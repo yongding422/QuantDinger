@@ -16,13 +16,14 @@ from app.services.live_trading.symbols import to_binance_futures_symbol
 
 
 class BinanceSpotClient(BaseRestClient):
-    def __init__(self, *, api_key: str, secret_key: str, base_url: str = None, enable_demo_trading: bool = False, timeout_sec: float = 15.0):
+    def __init__(self, *, api_key: str, secret_key: str, base_url: str = None, enable_demo_trading: bool = False, timeout_sec: float = 15.0, broker_id: str = ""):
         if not base_url:
             base_url = "https://demo-api.binance.com" if enable_demo_trading else "https://api.binance.com"
 
         super().__init__(base_url=base_url, timeout_sec=timeout_sec)
         self.api_key = (api_key or "").strip()
         self.secret_key = (secret_key or "").strip()
+        self.broker_id = (broker_id or "").strip()
         if not self.api_key or not self.secret_key:
             raise LiveTradingError("Missing Binance api_key/secret_key")
 
@@ -156,6 +157,21 @@ class BinanceSpotClient(BaseRestClient):
 
     def _signed_headers(self) -> Dict[str, str]:
         return {"X-MBX-APIKEY": self.api_key}
+
+    def _format_client_order_id(self, client_order_id: Optional[str]) -> str:
+        raw = str(client_order_id or "").strip()
+        broker_id = str(self.broker_id or "").strip()
+        if not raw:
+            return ""
+        if not broker_id:
+            return raw[:36]
+        prefix = f"x-{broker_id}"
+        if raw.startswith(prefix):
+            return raw[:36]
+        suffix_budget = max(0, 36 - len(prefix))
+        if suffix_budget <= 0:
+            return prefix[:36]
+        return f"{prefix}{raw[:suffix_budget]}"
 
     def _signed_request(self, method: str, path: str, *, params: Dict[str, Any]) -> Dict[str, Any]:
         p = dict(params or {})
@@ -382,8 +398,9 @@ class BinanceSpotClient(BaseRestClient):
             "quantity": self._dec_str(q_dec, strict_precision=qty_precision),
             "price": self._dec_str(px_dec),
         }
-        if client_order_id:
-            params["newClientOrderId"] = str(client_order_id)
+        client_order_id_norm = self._format_client_order_id(client_order_id)
+        if client_order_id_norm:
+            params["newClientOrderId"] = client_order_id_norm
         try:
             raw = self._signed_request("POST", "/api/v3/order", params=params)
         except LiveTradingError as e:
@@ -423,8 +440,9 @@ class BinanceSpotClient(BaseRestClient):
             "type": "MARKET",
             "quantity": self._dec_str(q_dec, strict_precision=qty_precision),
         }
-        if client_order_id:
-            params["newClientOrderId"] = str(client_order_id)
+        client_order_id_norm = self._format_client_order_id(client_order_id)
+        if client_order_id_norm:
+            params["newClientOrderId"] = client_order_id_norm
         try:
             raw = self._signed_request("POST", "/api/v3/order", params=params)
         except LiveTradingError as e:

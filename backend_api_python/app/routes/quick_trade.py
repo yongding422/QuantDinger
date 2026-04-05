@@ -65,9 +65,17 @@ def _convert_usdt_to_base_qty(client, symbol: str, usdt_amount: float, market_ty
             logger.info(f"Using limit price {limit_price} for USDT conversion")
         else:
             # Try to get current market price from exchange
+            if hasattr(client, "get_ticker"):
+                try:
+                    ticker = client.get_ticker(symbol=symbol)
+                    if isinstance(ticker, dict):
+                        current_price = float(ticker.get("last") or ticker.get("lastPx") or ticker.get("close") or ticker.get("price") or 0)
+                except Exception:
+                    current_price = 0.0
+
             # OKX
             from app.services.live_trading.okx import OkxClient
-            if isinstance(client, OkxClient):
+            if current_price <= 0 and isinstance(client, OkxClient):
                 try:
                     from app.services.live_trading.symbols import to_okx_spot_inst_id, to_okx_swap_inst_id
                     inst_id = to_okx_spot_inst_id(symbol) if market_type == "spot" else to_okx_swap_inst_id(symbol)
@@ -88,7 +96,7 @@ def _convert_usdt_to_base_qty(client, symbol: str, usdt_amount: float, market_ty
             # Binance - try to get price from public API
             from app.services.live_trading.binance import BinanceFuturesClient
             from app.services.live_trading.binance_spot import BinanceSpotClient
-            if isinstance(client, (BinanceFuturesClient, BinanceSpotClient)):
+            if current_price <= 0 and isinstance(client, (BinanceFuturesClient, BinanceSpotClient)):
                 try:
                     # Binance public ticker endpoint
                     base_url = getattr(client, "base_url", "")
@@ -284,10 +292,10 @@ def place_order():
             market_type = "spot" if leverage == 1 else "swap"
         if market_type in ("futures", "future", "perp", "perpetual"):
             market_type = "swap"
-        # Override: if leverage > 1, force swap; if leverage = 1, force spot
+        # Override only when user did not explicitly choose market_type.
         if leverage > 1:
             market_type = "swap"
-        elif leverage == 1:
+        elif leverage == 1 and not str(body.get("market_type") or "").strip():
             market_type = "spot"
 
         # ---- build exchange client ----
@@ -485,6 +493,8 @@ def _limit_order_kwargs(client, symbol, amount, price, side, market_type, client
     from app.services.live_trading.binance import BinanceFuturesClient
     from app.services.live_trading.binance_spot import BinanceSpotClient
     from app.services.live_trading.okx import OkxClient
+    from app.services.live_trading.bybit import BybitClient
+    from app.services.live_trading.deepcoin import DeepcoinClient
 
     if isinstance(client, (BinanceFuturesClient, BinanceSpotClient)):
         return {"quantity": amount, "price": price, "client_order_id": client_order_id}
@@ -497,6 +507,8 @@ def _limit_order_kwargs(client, symbol, amount, price, side, market_type, client
             pos_side = "long" if side.lower() == "buy" else "short"
             kwargs["pos_side"] = pos_side
         return kwargs
+    if isinstance(client, (BybitClient, DeepcoinClient)):
+        return {"qty": amount, "price": price, "client_order_id": client_order_id}
     # Generic fallback
     return {"size": amount, "price": price, "client_order_id": client_order_id}
 
@@ -592,6 +604,26 @@ def _parse_balance(raw: Any, exchange_id: str, market_type: str) -> Dict[str, An
                                     result["available"] = float(c.get("availableToWithdraw") or c.get("walletBalance") or 0)
                                     result["total"] = float(c.get("walletBalance") or 0)
                                     return result
+            # HTX spot
+            if isinstance(data, dict) and isinstance(data.get("list"), list):
+                for item in data.get("list") or []:
+                    if str(item.get("currency") or "").upper() == "USDT" and str(item.get("type") or "").lower() in ("trade", "available", ""):
+                        avail = float(item.get("balance") or 0)
+                        result["available"] = avail
+                total = 0.0
+                for item in data.get("list") or []:
+                    if str(item.get("currency") or "").upper() == "USDT":
+                        total += float(item.get("balance") or 0)
+                if total > 0 or result["available"] > 0:
+                    result["total"] = total or result["available"]
+                    return result
+            # HTX swap
+            if isinstance(data, list) and data and isinstance(data[0], dict):
+                first = data[0]
+                if "margin_available" in first or "margin_balance" in first or "withdraw_available" in first:
+                    result["available"] = float(first.get("margin_available") or first.get("withdraw_available") or 0)
+                    result["total"] = float(first.get("margin_balance") or first.get("margin_static") or 0)
+                    return result
         # Fallback: try to find any USDT-like values
         if isinstance(raw, dict):
             for k, v in raw.items():
@@ -679,7 +711,7 @@ def _parse_positions(raw: Any) -> list:
             # SWAP: posAmt, pos
             # SPOT: bal (balance), availBal (available balance)
             size = float(item.get("posAmt") or item.get("pos") or item.get("size") or item.get("contracts") or 
-                         item.get("bal") or item.get("availBal") or 0)
+                         item.get("bal") or item.get("availBal") or item.get("volume") or 0)
             if abs(size) < 1e-10:
                 continue
             
@@ -693,15 +725,21 @@ def _parse_positions(raw: Any) -> list:
                 pos_side = str(item.get("posSide", "")).strip().lower()
                 if pos_side in ("long", "short"):
                     side = pos_side
+            elif item.get("direction"):
+                dir_side = str(item.get("direction") or "").strip().lower()
+                if dir_side in ("buy", "long"):
+                    side = "long"
+                elif dir_side in ("sell", "short"):
+                    side = "short"
             
             result.append({
                 "symbol": item.get("symbol") or item.get("instId") or "",
                 "side": side,
                 "size": abs(size),
-                "entry_price": float(item.get("entryPrice") or item.get("avgCost") or item.get("avgPx") or item.get("avgPx") or 0),
-                "unrealized_pnl": float(item.get("unRealizedProfit") or item.get("upl") or item.get("unrealisedPnl") or item.get("pnl") or 0),
+                "entry_price": float(item.get("entryPrice") or item.get("avgCost") or item.get("avgPx") or item.get("cost_open") or 0),
+                "unrealized_pnl": float(item.get("unRealizedProfit") or item.get("upl") or item.get("unrealisedPnl") or item.get("profit_unreal") or item.get("pnl") or 0),
                 "leverage": float(item.get("leverage") or item.get("lever") or 1),
-                "mark_price": float(item.get("markPrice") or item.get("markPx") or item.get("last") or 0),
+                "mark_price": float(item.get("markPrice") or item.get("markPx") or item.get("last_price") or item.get("last") or 0),
             })
     except Exception as e:
         logger.warning(f"_parse_positions error: {e}")

@@ -1,9 +1,12 @@
 """
 Backtest Service
 """
+import hashlib
+import json
 import math
 import traceback
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 from typing import Dict, List, Any, Optional
 
 import pandas as pd
@@ -11,6 +14,7 @@ import numpy as np
 
 from app.data_sources import DataSourceFactory
 from app.utils.logger import get_logger
+from app.utils.db import get_db_connection
 from app.services.indicator_params import IndicatorParamsParser, IndicatorCaller
 
 logger = get_logger(__name__)
@@ -34,6 +38,74 @@ class BacktestService:
         'default_exec_tf': '1m',  # Default execution timeframe
         'fallback_exec_tf': '5m', # Fallback execution timeframe
     }
+
+    ENGINE_VERSION = 'strategy-backtest-v1'
+
+    def __init__(self):
+        self._storage_schema_ready = False
+
+    def ensure_storage_schema(self) -> None:
+        if self._storage_schema_ready:
+            return
+        try:
+            with get_db_connection() as db:
+                cur = db.cursor()
+                cur.execute("ALTER TABLE qd_backtest_runs ADD COLUMN IF NOT EXISTS run_type VARCHAR(50) DEFAULT 'indicator'")
+                cur.execute("ALTER TABLE qd_backtest_runs ADD COLUMN IF NOT EXISTS strategy_id INTEGER")
+                cur.execute("ALTER TABLE qd_backtest_runs ADD COLUMN IF NOT EXISTS strategy_name VARCHAR(255) DEFAULT ''")
+                cur.execute("ALTER TABLE qd_backtest_runs ADD COLUMN IF NOT EXISTS config_snapshot TEXT DEFAULT ''")
+                cur.execute("ALTER TABLE qd_backtest_runs ADD COLUMN IF NOT EXISTS engine_version VARCHAR(50) DEFAULT ''")
+                cur.execute("ALTER TABLE qd_backtest_runs ADD COLUMN IF NOT EXISTS code_hash VARCHAR(128) DEFAULT ''")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_backtest_runs_strategy_id ON qd_backtest_runs(strategy_id)")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_backtest_runs_run_type ON qd_backtest_runs(run_type)")
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS qd_backtest_trades (
+                        id SERIAL PRIMARY KEY,
+                        run_id INTEGER NOT NULL,
+                        user_id INTEGER NOT NULL DEFAULT 1,
+                        strategy_id INTEGER,
+                        trade_index INTEGER DEFAULT 0,
+                        trade_time VARCHAR(64) DEFAULT '',
+                        trade_type VARCHAR(64) DEFAULT '',
+                        side VARCHAR(32) DEFAULT '',
+                        price DOUBLE PRECISION DEFAULT 0,
+                        amount DOUBLE PRECISION DEFAULT 0,
+                        profit DOUBLE PRECISION DEFAULT 0,
+                        balance DOUBLE PRECISION DEFAULT 0,
+                        reason VARCHAR(64) DEFAULT '',
+                        payload_json TEXT DEFAULT '',
+                        created_at TIMESTAMP DEFAULT NOW()
+                    )
+                    """
+                )
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_backtest_trades_run_id ON qd_backtest_trades(run_id)")
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS qd_backtest_equity_points (
+                        id SERIAL PRIMARY KEY,
+                        run_id INTEGER NOT NULL,
+                        point_index INTEGER DEFAULT 0,
+                        point_time VARCHAR(64) DEFAULT '',
+                        point_value DOUBLE PRECISION DEFAULT 0,
+                        created_at TIMESTAMP DEFAULT NOW()
+                    )
+                    """
+                )
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_backtest_equity_points_run_id ON qd_backtest_equity_points(run_id)")
+                db.commit()
+                cur.close()
+            self._storage_schema_ready = True
+        except Exception:
+            logger.warning("Failed to ensure backtest storage schema", exc_info=True)
+
+    def _detect_trade_side(self, trade_type: str) -> str:
+        ty = str(trade_type or '').strip().lower()
+        if 'long' in ty:
+            return 'long'
+        if 'short' in ty:
+            return 'short'
+        return ''
     
     @staticmethod
     def _infer_candle_path(open_: float, high: float, low: float, close: float) -> List[float]:
@@ -109,6 +181,224 @@ class BacktestService:
                 'max_days': self.MTF_CONFIG['max_5m_days'],
                 'message': f'Backtest range {days_diff} days exceeds max limit {self.MTF_CONFIG["max_5m_days"]} days'
             }
+
+    def _liquidation_loss(self, capital: Any) -> float:
+        try:
+            equity = max(0.0, float(capital or 0.0))
+        except Exception:
+            equity = 0.0
+        return round(-equity, 2)
+
+    def persist_run(
+        self,
+        *,
+        user_id: int,
+        market: str,
+        symbol: str,
+        timeframe: str,
+        start_date_str: str,
+        end_date_str: str,
+        initial_capital: float,
+        commission: float,
+        slippage: float,
+        leverage: int,
+        trade_direction: str,
+        strategy_config: Optional[Dict[str, Any]] = None,
+        config_snapshot: Optional[Dict[str, Any]] = None,
+        status: str = 'success',
+        error_message: str = '',
+        result: Optional[Dict[str, Any]] = None,
+        indicator_id: Optional[int] = None,
+        strategy_id: Optional[int] = None,
+        strategy_name: str = '',
+        run_type: str = 'indicator',
+        code: str = '',
+    ) -> Optional[int]:
+        self.ensure_storage_schema()
+        run_id = None
+        try:
+            with get_db_connection() as db:
+                cur = db.cursor()
+                cur.execute(
+                    """
+                    INSERT INTO qd_backtest_runs
+                    (user_id, indicator_id, strategy_id, strategy_name, run_type, market, symbol, timeframe,
+                     start_date, end_date, initial_capital, commission, slippage, leverage, trade_direction,
+                     strategy_config, config_snapshot, engine_version, code_hash, status, error_message, result_json, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+                    """,
+                    (
+                        int(user_id or 1),
+                        int(indicator_id) if indicator_id is not None else None,
+                        int(strategy_id) if strategy_id is not None else None,
+                        str(strategy_name or ''),
+                        str(run_type or 'indicator'),
+                        str(market or ''),
+                        str(symbol or ''),
+                        str(timeframe or ''),
+                        str(start_date_str or ''),
+                        str(end_date_str or ''),
+                        float(initial_capital or 0),
+                        float(commission or 0),
+                        float(slippage or 0),
+                        int(leverage or 1),
+                        str(trade_direction or 'long'),
+                        json.dumps(strategy_config or {}, ensure_ascii=False),
+                        json.dumps(config_snapshot or {}, ensure_ascii=False),
+                        self.ENGINE_VERSION,
+                        hashlib.sha256(str(code or '').encode('utf-8')).hexdigest() if code else '',
+                        str(status or 'success'),
+                        str(error_message or ''),
+                        json.dumps(result or {}, ensure_ascii=False) if result else ''
+                    )
+                )
+                run_id = cur.lastrowid
+
+                if run_id and status == 'success' and isinstance(result, dict):
+                    for idx, trade in enumerate((result.get('trades') or []), start=1):
+                        cur.execute(
+                            """
+                            INSERT INTO qd_backtest_trades
+                            (run_id, user_id, strategy_id, trade_index, trade_time, trade_type, side, price, amount, profit, balance, reason, payload_json, created_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+                            """,
+                            (
+                                int(run_id),
+                                int(user_id or 1),
+                                int(strategy_id) if strategy_id is not None else None,
+                                idx,
+                                str(trade.get('time') or ''),
+                                str(trade.get('type') or ''),
+                                self._detect_trade_side(trade.get('type')),
+                                float(trade.get('price') or 0),
+                                float(trade.get('amount') or 0),
+                                float(trade.get('profit') or 0),
+                                float(trade.get('balance') or 0),
+                                str(trade.get('reason') or trade.get('close_reason') or ''),
+                                json.dumps(trade or {}, ensure_ascii=False),
+                            )
+                        )
+
+                    for idx, point in enumerate((result.get('equityCurve') or []), start=1):
+                        cur.execute(
+                            """
+                            INSERT INTO qd_backtest_equity_points
+                            (run_id, point_index, point_time, point_value, created_at)
+                            VALUES (?, ?, ?, ?, NOW())
+                            """,
+                            (
+                                int(run_id),
+                                idx,
+                                str(point.get('time') or ''),
+                                float(point.get('value') or 0),
+                            )
+                        )
+
+                db.commit()
+                cur.close()
+        except Exception:
+            logger.warning("Failed to persist backtest run", exc_info=True)
+        return run_id
+
+    def list_runs(
+        self,
+        *,
+        user_id: int,
+        limit: int = 50,
+        offset: int = 0,
+        indicator_id: Optional[int] = None,
+        strategy_id: Optional[int] = None,
+        run_type: Optional[str] = None,
+        symbol: str = '',
+        market: str = '',
+        timeframe: str = '',
+    ) -> List[Dict[str, Any]]:
+        self.ensure_storage_schema()
+        where = ["user_id = ?"]
+        params: List[Any] = [int(user_id or 1)]
+        if indicator_id is not None:
+            where.append("indicator_id = ?")
+            params.append(int(indicator_id))
+        if strategy_id is not None:
+            where.append("strategy_id = ?")
+            params.append(int(strategy_id))
+        if run_type:
+            where.append("run_type = ?")
+            params.append(str(run_type))
+        if symbol:
+            where.append("symbol = ?")
+            params.append(str(symbol))
+        if market:
+            where.append("market = ?")
+            params.append(str(market))
+        if timeframe:
+            where.append("timeframe = ?")
+            params.append(str(timeframe))
+
+        with get_db_connection() as db:
+            cur = db.cursor()
+            cur.execute(
+                f"""
+                SELECT id, user_id, indicator_id, strategy_id, strategy_name, run_type, market, symbol, timeframe,
+                       start_date, end_date, initial_capital, commission, slippage, leverage, trade_direction,
+                       strategy_config, config_snapshot, engine_version, code_hash, status, error_message,
+                       result_json, created_at
+                FROM qd_backtest_runs
+                WHERE {" AND ".join(where)}
+                ORDER BY id DESC
+                LIMIT ? OFFSET ?
+                """,
+                (*params, int(limit), int(offset)),
+            )
+            rows = cur.fetchall() or []
+            cur.close()
+
+        return [self._hydrate_run_row(r, include_result=False) for r in rows]
+
+    def get_run(self, *, user_id: int, run_id: int) -> Optional[Dict[str, Any]]:
+        self.ensure_storage_schema()
+        with get_db_connection() as db:
+            cur = db.cursor()
+            cur.execute(
+                """
+                SELECT id, user_id, indicator_id, strategy_id, strategy_name, run_type, market, symbol, timeframe,
+                       start_date, end_date, initial_capital, commission, slippage, leverage, trade_direction,
+                       strategy_config, config_snapshot, engine_version, code_hash, status, error_message,
+                       result_json, created_at
+                FROM qd_backtest_runs
+                WHERE id = ? AND user_id = ?
+                """,
+                (int(run_id), int(user_id or 1)),
+            )
+            row = cur.fetchone()
+            cur.close()
+        if not row:
+            return None
+        return self._hydrate_run_row(row, include_result=True)
+
+    def _hydrate_run_row(self, row: Dict[str, Any], include_result: bool = True) -> Dict[str, Any]:
+        item = dict(row or {})
+        try:
+            item['strategy_config'] = json.loads(item.get('strategy_config') or '{}')
+        except Exception:
+            item['strategy_config'] = {}
+        try:
+            item['config_snapshot'] = json.loads(item.get('config_snapshot') or '{}')
+        except Exception:
+            item['config_snapshot'] = {}
+        try:
+            result = json.loads(item.get('result_json') or '{}')
+        except Exception:
+            result = {}
+
+        item['total_return'] = result.get('totalReturn')
+        item['annual_return'] = result.get('annualReturn')
+        item['win_rate'] = result.get('winRate')
+        item['total_trades'] = result.get('totalTrades')
+        if include_result:
+            item['result'] = result
+        item.pop('result_json', None)
+        return item
     
     def run_multi_timeframe(
         self,
@@ -124,7 +414,10 @@ class BacktestService:
         leverage: int = 1,
         trade_direction: str = 'long',
         strategy_config: Optional[Dict[str, Any]] = None,
-        enable_mtf: bool = True
+        enable_mtf: bool = True,
+        indicator_params: Optional[Dict[str, Any]] = None,
+        user_id: int = 1,
+        indicator_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Multi-timeframe backtest.
@@ -152,9 +445,36 @@ class BacktestService:
         """
         # Get execution timeframe
         exec_tf, precision_info = self.get_execution_timeframe(start_date, end_date, market)
+        cfg = strategy_config or {}
+        exec_cfg = cfg.get('execution') or {}
+        scale_cfg = cfg.get('scale') or {}
+        signal_timing = str(exec_cfg.get('signalTiming') or 'next_bar_open').strip().lower()
+        enabled_scale_keys = ['trendAdd', 'dcaAdd', 'trendReduce', 'adverseReduce']
+        has_scale_rules = any(bool((scale_cfg.get(key) or {}).get('enabled')) for key in enabled_scale_keys)
         
-        if not enable_mtf or not precision_info.get('enabled'):
-            # Fallback to standard candle backtest
+        # Skip MTF when: disabled, not supported, or signal tf <= exec tf (no precision gain)
+        signal_tf_seconds = self.TIMEFRAME_SECONDS.get(timeframe, 86400)
+        exec_tf_seconds = self.TIMEFRAME_SECONDS.get(exec_tf, 300) if exec_tf else signal_tf_seconds
+        skip_mtf = (
+            not enable_mtf
+            or not precision_info.get('enabled')
+            or signal_tf_seconds <= exec_tf_seconds
+            or has_scale_rules
+            or signal_timing not in ['next_bar_open', 'next_open', 'nextopen', 'next']
+        )
+        
+        if skip_mtf:
+            fallback_reason = None
+            if has_scale_rules:
+                fallback_reason = 'scale_rules_not_supported_in_mtf'
+            elif signal_timing not in ['next_bar_open', 'next_open', 'nextopen', 'next']:
+                fallback_reason = 'signal_timing_not_supported_in_mtf'
+            elif signal_tf_seconds <= exec_tf_seconds:
+                fallback_reason = 'no_precision_gain'
+            logger.info(
+                f"Using standard backtest: tf={timeframe} "
+                f"(MTF skipped, reason={fallback_reason}, signal_tf_s={signal_tf_seconds}, exec_tf_s={exec_tf_seconds})"
+            )
             result = self.run(
                 indicator_code=indicator_code,
                 market=market,
@@ -167,7 +487,10 @@ class BacktestService:
                 slippage=slippage,
                 leverage=leverage,
                 trade_direction=trade_direction,
-                strategy_config=strategy_config
+                strategy_config=strategy_config,
+                indicator_params=indicator_params,
+                user_id=user_id,
+                indicator_id=indicator_id,
             )
             result['precision_info'] = precision_info or {
                 'enabled': False,
@@ -175,6 +498,12 @@ class BacktestService:
                 'precision': 'standard',
                 'message': 'Using standard candle backtest'
             }
+            if fallback_reason:
+                result['precision_info']['fallback_reason'] = fallback_reason
+                if fallback_reason == 'scale_rules_not_supported_in_mtf':
+                    result['precision_info']['message'] = 'Using standard backtest because scale rules are not fully supported in MTF mode'
+                elif fallback_reason == 'signal_timing_not_supported_in_mtf':
+                    result['precision_info']['message'] = 'Using standard backtest because this execution timing is not fully supported in MTF mode'
             return result
         
         logger.info(f"Multi-timeframe backtest: strategy_tf={timeframe}, exec_tf={exec_tf}, range={start_date} ~ {end_date}")
@@ -189,7 +518,10 @@ class BacktestService:
             'leverage': leverage,
             'initial_capital': initial_capital,
             'commission': commission,
-            'trade_direction': trade_direction
+            'trade_direction': trade_direction,
+            'indicator_params': indicator_params or {},
+            'user_id': user_id,
+            'indicator_id': indicator_id,
         }
         signals = self._execute_indicator(indicator_code, df_signal, backtest_params)
         logger.info(f"Signals generated: {list(signals.keys()) if isinstance(signals, dict) else type(signals)}")
@@ -212,7 +544,10 @@ class BacktestService:
                 slippage=slippage,
                 leverage=leverage,
                 trade_direction=trade_direction,
-                strategy_config=strategy_config
+                strategy_config=strategy_config,
+                indicator_params=indicator_params,
+                user_id=user_id,
+                indicator_id=indicator_id,
             )
             result['precision_info'] = {
                 'enabled': False,
@@ -598,15 +933,10 @@ class BacktestService:
                         pending_signal = sig_type
                         pending_signal_time = sig_effective_time
                         signal_queue_idx += 1
-                        if executed_trades_count < 5 or signal_queue_idx <= 5:
-                            logger.info(f"Signal ready: {sig_type} @ {timestamp} (effective_time={sig_effective_time}, sig_bar_time={sig_bar_time}), "
-                                      f"will execute at open price (both_mode={both_mode_active}, position={position})")
+                        if executed_trades_count < 3:
+                            logger.info(f"Signal ready: {sig_type} @ {timestamp} (effective_time={sig_effective_time})")
                         break
                     else:
-                        # Signal doesn't meet execution conditions, skip
-                        if signal_queue_idx < 10:
-                            logger.info(f"Skipping signal #{signal_queue_idx}: {sig_type} @ {sig_effective_time} "
-                                      f"(position={position}, can_execute=False, both_mode={both_mode_active})")
                         signal_queue_idx += 1
                         continue
                 else:
@@ -717,6 +1047,7 @@ class BacktestService:
                                 commission_fee = shares * exec_price * commission
                                 profit = (entry_price - exec_price) * shares - commission_fee
                                 if capital + profit <= 0:
+                                    liquidation_loss = self._liquidation_loss(capital)
                                     capital = 0
                                     is_liquidated = True
                                     trades.append({
@@ -724,7 +1055,7 @@ class BacktestService:
                                         'type': 'liquidation',
                                         'price': round(exec_price, 4),
                                         'amount': round(shares, 4),
-                                        'profit': round(-initial_capital, 2),
+                                        'profit': liquidation_loss,
                                         'balance': 0
                                     })
                                 else:
@@ -756,6 +1087,7 @@ class BacktestService:
                                     commission_fee = shares * exec_price * commission
                                     profit = (entry_price - exec_price) * shares - commission_fee
                                     if capital + profit <= 0:
+                                        liquidation_loss = self._liquidation_loss(capital)
                                         capital = 0
                                         is_liquidated = True
                                         trades.append({
@@ -763,7 +1095,7 @@ class BacktestService:
                                             'type': 'liquidation',
                                             'price': round(exec_price, 4),
                                             'amount': round(shares, 4),
-                                            'profit': round(-initial_capital, 2),
+                                            'profit': liquidation_loss,
                                             'balance': 0
                                         })
                                     else:
@@ -1032,6 +1364,130 @@ class BacktestService:
                 raise ValueError(f"No trades executed despite {len(signal_queue)} signals. Check signal timing and position state logic.")
         
         return equity_curve, trades, total_commission_paid
+
+    def run_strategy_snapshot(
+        self,
+        snapshot: Dict[str, Any],
+        start_date: datetime,
+        end_date: datetime,
+    ) -> Dict[str, Any]:
+        if not snapshot:
+            raise ValueError("strategy snapshot is required")
+
+        code = snapshot.get('code') or ''
+        market = snapshot.get('market') or 'Crypto'
+        symbol = snapshot.get('symbol') or ''
+        timeframe = snapshot.get('timeframe') or '1D'
+        initial_capital = float(snapshot.get('initial_capital') or 10000)
+        commission = float(snapshot.get('commission') or 0)
+        slippage = float(snapshot.get('slippage') or 0)
+        leverage = int(snapshot.get('leverage') or 1)
+        trade_direction = str(snapshot.get('trade_direction') or 'long')
+        strategy_config = snapshot.get('strategy_config') or {}
+        indicator_params = snapshot.get('indicator_params') or {}
+        indicator_id = snapshot.get('indicator_id')
+        user_id = int(snapshot.get('user_id') or 1)
+        run_type = str(snapshot.get('run_type') or 'strategy_indicator')
+
+        if run_type == 'strategy_script':
+            return self._run_script_strategy(
+                code=code,
+                market=market,
+                symbol=symbol,
+                timeframe=timeframe,
+                start_date=start_date,
+                end_date=end_date,
+                initial_capital=initial_capital,
+                commission=commission,
+                slippage=slippage,
+                leverage=leverage,
+                trade_direction=trade_direction,
+                strategy_config=strategy_config,
+            )
+
+        if bool(snapshot.get('enable_mtf')) and str(market).lower() in ['crypto', 'cryptocurrency']:
+            result = self.run_multi_timeframe(
+                indicator_code=code,
+                market=market,
+                symbol=symbol,
+                timeframe=timeframe,
+                start_date=start_date,
+                end_date=end_date,
+                initial_capital=initial_capital,
+                commission=commission,
+                slippage=slippage,
+                leverage=leverage,
+                trade_direction=trade_direction,
+                strategy_config=strategy_config,
+                enable_mtf=True,
+                indicator_params=indicator_params,
+                user_id=user_id,
+                indicator_id=indicator_id,
+            )
+        else:
+            result = self.run(
+                indicator_code=code,
+                market=market,
+                symbol=symbol,
+                timeframe=timeframe,
+                start_date=start_date,
+                end_date=end_date,
+                initial_capital=initial_capital,
+                commission=commission,
+                slippage=slippage,
+                leverage=leverage,
+                trade_direction=trade_direction,
+                strategy_config=strategy_config,
+                indicator_params=indicator_params,
+                user_id=user_id,
+                indicator_id=indicator_id,
+            )
+            result['precision_info'] = {
+                'enabled': False,
+                'timeframe': timeframe,
+                'precision': 'standard',
+                'message': 'Using standard strategy backtest'
+            }
+        return result
+
+    def _run_script_strategy(
+        self,
+        *,
+        code: str,
+        market: str,
+        symbol: str,
+        timeframe: str,
+        start_date: datetime,
+        end_date: datetime,
+        initial_capital: float,
+        commission: float,
+        slippage: float,
+        leverage: int,
+        trade_direction: str,
+        strategy_config: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        df = self._fetch_kline_data(market, symbol, timeframe, start_date, end_date)
+        if df.empty:
+            raise ValueError("No candle data available in the backtest date range")
+
+        signals = self._execute_script_strategy(code, df, {
+            'initial_capital': initial_capital,
+            'leverage': leverage,
+            'trade_direction': trade_direction,
+            'strategy_config': strategy_config or {},
+        })
+        equity_curve, trades, total_commission = self._simulate_trading(
+            df, signals, initial_capital, commission, slippage, leverage, trade_direction, strategy_config
+        )
+        metrics = self._calculate_metrics(equity_curve, trades, initial_capital, timeframe, start_date, end_date, total_commission)
+        result = self._format_result(metrics, equity_curve, trades)
+        result['precision_info'] = {
+            'enabled': False,
+            'timeframe': timeframe,
+            'precision': 'standard',
+            'message': 'Using standard strategy script backtest'
+        }
+        return result
     
     def run_code_strategy(
         self,
@@ -1101,7 +1557,10 @@ class BacktestService:
         slippage: float = 0.0,  # Ideal backtest environment, no slippage
         leverage: int = 1,
         trade_direction: str = 'long',
-        strategy_config: Optional[Dict[str, Any]] = None
+        strategy_config: Optional[Dict[str, Any]] = None,
+        indicator_params: Optional[Dict[str, Any]] = None,
+        user_id: int = 1,
+        indicator_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Run backtest.
@@ -1132,7 +1591,10 @@ class BacktestService:
             'leverage': leverage,
             'initial_capital': initial_capital,
             'commission': commission,
-            'trade_direction': trade_direction
+            'trade_direction': trade_direction,
+            'indicator_params': indicator_params or {},
+            'user_id': user_id,
+            'indicator_id': indicator_id,
         }
         signals = self._execute_indicator(indicator_code, df, backtest_params)
         
@@ -1437,6 +1899,256 @@ import pandas as pd
             logger.error(traceback.format_exc())
         
         return signals
+
+    def _execute_script_strategy(self, code: str, df: pd.DataFrame, runtime: Optional[Dict[str, Any]] = None) -> Dict[str, pd.Series]:
+        runtime = runtime or {}
+        if not code or not str(code).strip():
+            raise ValueError("Strategy script is empty")
+
+        df_exec = df.copy().reset_index(drop=False)
+        if 'time' not in df_exec.columns:
+            df_exec.rename(columns={df_exec.columns[0]: 'time'}, inplace=True)
+
+        open_long = pd.Series(False, index=df.index)
+        close_long = pd.Series(False, index=df.index)
+        open_short = pd.Series(False, index=df.index)
+        close_short = pd.Series(False, index=df.index)
+        add_long = pd.Series(False, index=df.index)
+        add_short = pd.Series(False, index=df.index)
+
+        class ScriptBar(dict):
+            def __getattr__(self, name: str) -> Any:
+                try:
+                    return self[name]
+                except KeyError as exc:
+                    raise AttributeError(name) from exc
+
+        class ScriptPosition(dict):
+            def __init__(self):
+                super().__init__()
+                self.clear_position()
+
+            def __getattr__(self, name: str) -> Any:
+                try:
+                    return self[name]
+                except KeyError as exc:
+                    raise AttributeError(name) from exc
+
+            def __bool__(self) -> bool:
+                return bool(self.get('side')) and float(self.get('size') or 0) > 0
+
+            def __int__(self) -> int:
+                return int(self.get('direction') or 0)
+
+            def __float__(self) -> float:
+                return float(self.get('direction') or 0)
+
+            def __eq__(self, other: Any) -> bool:
+                try:
+                    return int(self) == int(other)
+                except Exception:
+                    return dict.__eq__(self, other)
+
+            def __lt__(self, other: Any) -> bool:
+                return int(self) < int(other)
+
+            def __le__(self, other: Any) -> bool:
+                return int(self) <= int(other)
+
+            def __gt__(self, other: Any) -> bool:
+                return int(self) > int(other)
+
+            def __ge__(self, other: Any) -> bool:
+                return int(self) >= int(other)
+
+            def clear_position(self) -> None:
+                self.clear()
+                self.update({
+                    'side': '',
+                    'size': 0.0,
+                    'entry_price': 0.0,
+                    'direction': 0,
+                    'amount': 0.0,
+                })
+
+            def open_position(self, side: str, entry_price: float, amount: float) -> None:
+                direction = 1 if side == 'long' else (-1 if side == 'short' else 0)
+                size = float(amount or 0.0)
+                price = float(entry_price or 0.0)
+                self.clear()
+                self.update({
+                    'side': side,
+                    'size': size,
+                    'entry_price': price,
+                    'direction': direction,
+                    'amount': size,
+                })
+
+            def add_position(self, entry_price: float, amount: float) -> None:
+                extra = float(amount or 0.0)
+                if extra <= 0:
+                    return
+                current_size = float(self.get('size') or 0.0)
+                current_price = float(self.get('entry_price') or 0.0)
+                next_size = current_size + extra
+                next_price = float(entry_price or current_price or 0.0)
+                if current_size > 0 and current_price > 0 and next_size > 0:
+                    next_price = ((current_price * current_size) + (float(entry_price or current_price) * extra)) / next_size
+                self['size'] = next_size
+                self['amount'] = next_size
+                self['entry_price'] = next_price
+
+        class ScriptBacktestContext:
+            def __init__(self, bars_df: pd.DataFrame, initial_balance: float):
+                self._bars_df = bars_df
+                self._params: Dict[str, Any] = {}
+                self._orders: List[Dict[str, Any]] = []
+                self._logs: List[str] = []
+                self.current_index = -1
+                self.position = ScriptPosition()
+                self.balance = float(initial_balance)
+                self.equity = float(initial_balance)
+
+            def param(self, name: str, default: Any = None) -> Any:
+                if name not in self._params:
+                    self._params[name] = default
+                return self._params[name]
+
+            def bars(self, n: int = 1):
+                start = max(0, self.current_index - int(n) + 1)
+                out = []
+                for _, row in self._bars_df.iloc[start:self.current_index + 1].iterrows():
+                    out.append(ScriptBar(
+                        open=float(row.get('open') or 0),
+                        high=float(row.get('high') or 0),
+                        low=float(row.get('low') or 0),
+                        close=float(row.get('close') or 0),
+                        volume=float(row.get('volume') or 0),
+                        timestamp=row.get('time')
+                    ))
+                return out
+
+            def log(self, message: Any):
+                self._logs.append(str(message))
+
+            def buy(self, price: Any = None, amount: Any = None):
+                self._orders.append({'action': 'buy', 'price': price, 'amount': amount})
+
+            def sell(self, price: Any = None, amount: Any = None):
+                self._orders.append({'action': 'sell', 'price': price, 'amount': amount})
+
+            def close_position(self):
+                self._orders.append({'action': 'close'})
+
+        try:
+            import builtins
+
+            def safe_import(name, *args, **kwargs):
+                allowed_modules = ['numpy', 'pandas', 'math', 'json', 'datetime', 'time']
+                if name in allowed_modules or name.split('.')[0] in allowed_modules:
+                    return builtins.__import__(name, *args, **kwargs)
+                raise ImportError(f"Import not allowed: {name}")
+
+            safe_builtins = {k: getattr(builtins, k) for k in dir(builtins)
+                             if not k.startswith('_') and k not in ['eval', 'exec', 'compile', 'open', 'input', 'help', 'exit', 'quit']}
+            safe_builtins['__import__'] = safe_import
+
+            ctx = ScriptBacktestContext(df_exec, float(runtime.get('initial_capital') or 10000))
+            exec_env = {
+                '__builtins__': safe_builtins,
+                'np': np,
+                'pd': pd,
+            }
+
+            from app.utils.safe_exec import validate_code_safety
+            is_safe, error_msg = validate_code_safety(code)
+            if not is_safe:
+                raise ValueError(f"Code contains unsafe operations: {error_msg}")
+
+            from app.utils.safe_exec import safe_exec_code
+            exec_result = safe_exec_code(
+                code=code,
+                exec_globals=exec_env,
+                exec_locals=exec_env,
+                timeout=60
+            )
+            if not exec_result['success']:
+                raise RuntimeError(f"Code execution failed: {exec_result['error']}")
+
+            on_init = exec_env.get('on_init')
+            on_bar = exec_env.get('on_bar')
+            if not callable(on_bar):
+                raise ValueError("Strategy script must define on_bar(ctx, bar)")
+            if callable(on_init):
+                on_init(ctx)
+
+            trade_direction = str(runtime.get('trade_direction') or 'both').lower()
+            if trade_direction not in ('long', 'short', 'both'):
+                trade_direction = 'both'
+
+            for i, row in df_exec.iterrows():
+                ctx.current_index = int(i)
+                ctx._orders = []
+                bar = ScriptBar(
+                    open=float(row.get('open') or 0),
+                    high=float(row.get('high') or 0),
+                    low=float(row.get('low') or 0),
+                    close=float(row.get('close') or 0),
+                    volume=float(row.get('volume') or 0),
+                    timestamp=row.get('time')
+                )
+                on_bar(ctx, bar)
+
+                for order in ctx._orders:
+                    action = str(order.get('action') or '').lower()
+                    order_price = float(order.get('price') or bar['close'] or 0)
+                    order_amount = float(order.get('amount') or 0)
+                    if action == 'close':
+                        if ctx.position > 0:
+                            close_long.iloc[i] = True
+                            ctx.position.clear_position()
+                        elif ctx.position < 0:
+                            close_short.iloc[i] = True
+                            ctx.position.clear_position()
+                        continue
+
+                    if action == 'buy':
+                        if ctx.position < 0:
+                            close_short.iloc[i] = True
+                            ctx.position.clear_position()
+                        if trade_direction in ('long', 'both'):
+                            if ctx.position == 0:
+                                open_long.iloc[i] = True
+                                ctx.position.open_position('long', order_price, order_amount)
+                            else:
+                                add_long.iloc[i] = True
+                                ctx.position.add_position(order_price, order_amount)
+                        continue
+
+                    if action == 'sell':
+                        if ctx.position > 0:
+                            close_long.iloc[i] = True
+                            ctx.position.clear_position()
+                        if trade_direction in ('short', 'both'):
+                            if ctx.position == 0:
+                                open_short.iloc[i] = True
+                                ctx.position.open_position('short', order_price, order_amount)
+                            else:
+                                add_short.iloc[i] = True
+                                ctx.position.add_position(order_price, order_amount)
+
+            return {
+                'open_long': open_long,
+                'close_long': close_long,
+                'open_short': open_short,
+                'close_short': close_short,
+                'add_long': add_long,
+                'add_short': add_short,
+            }
+        except Exception as e:
+            logger.error(f"Strategy script execution error: {e}")
+            logger.error(traceback.format_exc())
+            raise
     
     def _get_indicator_functions(self) -> Dict:
         """Get technical indicator functions"""
@@ -1748,13 +2460,14 @@ import pandas as pd
             # If no position and balance low, stop trading
             if position == 0 and capital < min_capital_to_trade:
                 is_liquidated = True
+                liquidation_loss = self._liquidation_loss(capital)
                 capital = 0
                 trades.append({
                     'time': timestamp.strftime('%Y-%m-%d %H:%M'),
                     'type': 'liquidation',
                     'price': round(float(row.get('close', 0) or 0), 4),
                     'amount': 0,
-                    'profit': round(-initial_capital, 2),
+                    'profit': liquidation_loss,
                     'balance': 0
                 })
                 equity_curve.append({'time': timestamp.strftime('%Y-%m-%d %H:%M'), 'value': 0})
@@ -1873,6 +2586,7 @@ import pandas as pd
                         profit = (entry_price - exec_price_close) * shares - commission_fee_close
 
                         if capital + profit <= 0:
+                            liquidation_loss = self._liquidation_loss(capital)
                             capital = 0
                             is_liquidated = True
                             trades.append({
@@ -1880,7 +2594,7 @@ import pandas as pd
                                 'type': 'liquidation',
                                 'price': round(exec_price_close, 4),
                                 'amount': round(shares, 4),
-                                'profit': round(-initial_capital, 2),
+                                'profit': liquidation_loss,
                                 'balance': 0
                             })
                             position = 0
@@ -1951,13 +2665,14 @@ import pandas as pd
                 # Stop if balance too low after exit
                 if capital < min_capital_to_trade:
                     is_liquidated = True
+                    liquidation_loss = self._liquidation_loss(capital)
                     capital = 0
                     trades.append({
                         'time': timestamp.strftime('%Y-%m-%d %H:%M'),
                         'type': 'liquidation',
                         'price': round(exec_price, 4),
                         'amount': 0,
-                        'profit': round(-initial_capital, 2),
+                        'profit': liquidation_loss,
                         'balance': 0
                     })
             
@@ -1974,6 +2689,7 @@ import pandas as pd
                 
                 if capital + profit <= 0:
                     logger.warning(f"Insufficient funds when closing short - liquidation")
+                    liquidation_loss = self._liquidation_loss(capital)
                     capital = 0
                     is_liquidated = True
                     trades.append({
@@ -1981,7 +2697,7 @@ import pandas as pd
                         'type': 'liquidation',
                         'price': round(exec_price, 4),
                         'amount': round(shares, 4),
-                        'profit': round(-capital, 2),
+                        'profit': liquidation_loss,
                         'balance': 0
                     })
                     position = 0
@@ -2014,13 +2730,14 @@ import pandas as pd
 
                 if capital < min_capital_to_trade:
                     is_liquidated = True
+                    liquidation_loss = self._liquidation_loss(capital)
                     capital = 0
                     trades.append({
                         'time': timestamp.strftime('%Y-%m-%d %H:%M'),
                         'type': 'liquidation',
                         'price': round(exec_price, 4),
                         'amount': 0,
-                        'profit': round(-initial_capital, 2),
+                        'profit': liquidation_loss,
                         'balance': 0
                     })
             
@@ -2471,13 +3188,14 @@ import pandas as pd
                             if hit_liq and (not hit_sl or (sl_price is not None and sl_price <= liquidation_price)):
                                 # Liquidation happens before stop-loss (or stop-loss not configured).
                                 is_liquidated = True
+                                liquidation_loss = self._liquidation_loss(capital)
                                 capital = 0
                                 trades.append({
                                     'time': timestamp.strftime('%Y-%m-%d %H:%M'),
                                     'type': 'liquidation',
                                     'price': round(liquidation_price, 4),
                                     'amount': round(position, 4),
-                                    'profit': round(-initial_capital, 2),
+                                    'profit': liquidation_loss,
                                     'balance': 0
                                 })
                             else:
@@ -2593,13 +3311,14 @@ import pandas as pd
                             if hit_liq and (not hit_sl or (sl_price is not None and sl_price >= liquidation_price)):
                                 # Liquidation happens before stop-loss (or stop-loss not configured).
                                 is_liquidated = True
+                                liquidation_loss = self._liquidation_loss(capital)
                                 capital = 0
                                 trades.append({
                                     'time': timestamp.strftime('%Y-%m-%d %H:%M'),
                                     'type': 'liquidation',
                                     'price': round(liquidation_price, 4),
                                     'amount': round(abs(position), 4),
-                                    'profit': round(-initial_capital, 2),
+                                    'profit': liquidation_loss,
                                     'balance': 0
                                 })
                             else:
@@ -2661,13 +3380,14 @@ import pandas as pd
                         logger.warning(f"Long liquidation! entry={entry_price:.2f}, low={low:.2f}, "
                                      f"爆仓线={liquidation_price:.2f}, 止损价={stop_loss_price:.2f}")
                         is_liquidated = True
+                        liquidation_loss = self._liquidation_loss(capital)
                         capital = 0
                         trades.append({
                             'time': timestamp.strftime('%Y-%m-%d %H:%M'),
                             'type': 'liquidation',
                             'price': round(liquidation_price, 4),
                             'amount': round(abs(position), 4),
-                            'profit': round(-initial_capital, 2),
+                            'profit': liquidation_loss,
                             'balance': 0
                         })
                     
@@ -2707,13 +3427,14 @@ import pandas as pd
                         logger.warning(f"Short liquidation! entry={entry_price:.2f}, high={high:.2f}, "
                                      f"爆仓线={liquidation_price:.2f}, 止损价={stop_loss_price:.2f}")
                         is_liquidated = True
+                        liquidation_loss = self._liquidation_loss(capital)
                         capital = 0
                         trades.append({
                             'time': timestamp.strftime('%Y-%m-%d %H:%M'),
                             'type': 'liquidation',
                             'price': round(liquidation_price, 4),
                             'amount': round(abs(position), 4),
-                            'profit': round(-initial_capital, 2),
+                            'profit': liquidation_loss,
                             'balance': 0
                         })
                     
@@ -2769,6 +3490,7 @@ import pandas as pd
                 
                 if capital + profit <= 0:
                     logger.warning(f"Liquidation at backtest end!")
+                    liquidation_loss = self._liquidation_loss(capital)
                     capital = 0
                     is_liquidated = True
                     trades.append({
@@ -2776,7 +3498,7 @@ import pandas as pd
                         'type': 'liquidation',
                         'price': round(exec_price, 4),
                         'amount': round(shares, 4),
-                        'profit': round(-capital, 2),
+                        'profit': liquidation_loss,
                         'balance': 0
                     })
                 else:
@@ -2913,13 +3635,14 @@ import pandas as pd
             # If no position and balance low, stop trading
             if position == 0 and capital < min_capital_to_trade:
                 is_liquidated = True
+                liquidation_loss = self._liquidation_loss(capital)
                 capital = 0
                 trades.append({
                     'time': timestamp.strftime('%Y-%m-%d %H:%M'),
                     'type': 'liquidation',
                     'price': round(float(row.get('close', 0) or 0), 4),
                     'amount': 0,
-                    'profit': round(-initial_capital, 2),
+                    'profit': liquidation_loss,
                     'balance': 0
                 })
                 equity_curve.append({'time': timestamp.strftime('%Y-%m-%d %H:%M'), 'value': 0})
@@ -3011,6 +3734,7 @@ import pandas as pd
                         # Entry commission deducted, only deduct exit commission
                         profit = (entry_price - exec_price) * shares - commission_fee
                         if capital + profit <= 0:
+                            liquidation_loss = self._liquidation_loss(capital)
                             capital = 0
                             is_liquidated = True
                             trades.append({
@@ -3018,7 +3742,7 @@ import pandas as pd
                                 'type': 'liquidation',
                                 'price': round(exec_price, 4),
                                 'amount': round(shares, 4),
-                                'profit': round(-initial_capital, 2),
+                                'profit': liquidation_loss,
                                 'balance': 0
                             })
                             position = 0
@@ -3403,13 +4127,14 @@ import pandas as pd
                     trend_add_times = dca_add_times = trend_reduce_times = adverse_reduce_times = 0
                     if capital < min_capital_to_trade:
                         is_liquidated = True
+                        liquidation_loss = self._liquidation_loss(capital)
                         capital = 0
                         trades.append({
                             'time': timestamp.strftime('%Y-%m-%d %H:%M'),
                             'type': 'liquidation',
                             'price': round(exec_price, 4),
                             'amount': 0,
-                            'profit': round(-initial_capital, 2),
+                            'profit': liquidation_loss,
                             'balance': 0
                         })
             
@@ -3466,6 +4191,7 @@ import pandas as pd
                     # Check for liquidation
                     if capital + profit <= 0:
                         logger.warning(f"Insufficient funds when closing short - liquidation: capital={capital:.2f}, loss={-profit:.2f}")
+                        liquidation_loss = self._liquidation_loss(capital)
                         capital = 0
                         is_liquidated = True
                         trades.append({
@@ -3473,7 +4199,7 @@ import pandas as pd
                             'type': 'liquidation',
                             'price': round(exec_price, 4),
                             'amount': round(shares, 4),
-                            'profit': round(-capital, 2),
+                            'profit': liquidation_loss,
                             'balance': 0
                         })
                     else:
@@ -3496,13 +4222,14 @@ import pandas as pd
                     trend_add_times = dca_add_times = trend_reduce_times = adverse_reduce_times = 0
                     if capital < min_capital_to_trade and not is_liquidated:
                         is_liquidated = True
+                        liquidation_loss = self._liquidation_loss(capital)
                         capital = 0
                         trades.append({
                             'time': timestamp.strftime('%Y-%m-%d %H:%M'),
                             'type': 'liquidation',
                             'price': round(exec_price, 4),
                             'amount': 0,
-                            'profit': round(-initial_capital, 2),
+                            'profit': liquidation_loss,
                             'balance': 0
                         })
             
@@ -3608,13 +4335,14 @@ import pandas as pd
                     # Stop if balance too low after exit
                     if capital < min_capital_to_trade or is_liquidated:
                         is_liquidated = True
+                        liquidation_loss = self._liquidation_loss(capital)
                         capital = 0
                         trades.append({
                             'time': timestamp.strftime('%Y-%m-%d %H:%M'),
                             'type': 'liquidation',
                             'price': round(exec_price, 4),
                             'amount': 0,
-                            'profit': round(-initial_capital, 2),
+                            'profit': liquidation_loss,
                             'balance': 0
                         })
                         continue
@@ -3661,6 +4389,7 @@ import pandas as pd
                     # Check for liquidation
                     if capital + profit <= 0:
                         logger.warning(f"Insufficient funds when closing short - liquidation: capital={capital:.2f}, loss={-profit:.2f}")
+                        liquidation_loss = self._liquidation_loss(capital)
                         capital = 0
                         is_liquidated = True
                         trades.append({
@@ -3668,7 +4397,7 @@ import pandas as pd
                             'type': 'liquidation',
                             'price': round(exec_price, 4),
                             'amount': round(shares, 4),
-                            'profit': round(-capital, 2),
+                            'profit': liquidation_loss,
                             'balance': 0
                         })
                         position = 0
@@ -3689,13 +4418,14 @@ import pandas as pd
                     
                     if capital < min_capital_to_trade or is_liquidated:
                         is_liquidated = True
+                        liquidation_loss = self._liquidation_loss(capital)
                         capital = 0
                         trades.append({
                             'time': timestamp.strftime('%Y-%m-%d %H:%M'),
                             'type': 'liquidation',
                             'price': round(exec_price, 4),
                             'amount': 0,
-                            'profit': round(-initial_capital, 2),
+                            'profit': liquidation_loss,
                             'balance': 0
                         })
                         continue
@@ -3738,13 +4468,14 @@ import pandas as pd
                     if price <= liquidation_price:
                         logger.warning(f"Long liquidation! entry={entry_price:.2f}, current={price:.2f}, liq_price={liquidation_price:.2f}")
                         is_liquidated = True
+                        liquidation_loss = self._liquidation_loss(capital)
                         capital = 0
                         trades.append({
                             'time': timestamp.strftime('%Y-%m-%d %H:%M'),
                             'type': 'liquidation',
                             'price': round(liquidation_price, 4),
                             'amount': round(abs(position), 4),
-                            'profit': round(-initial_capital, 2),
+                            'profit': liquidation_loss,
                             'balance': 0
                         })
                         position = 0
@@ -3759,13 +4490,14 @@ import pandas as pd
                     if price >= liquidation_price:
                         logger.warning(f"Short liquidation! entry={entry_price:.2f}, current={price:.2f}, liq_price={liquidation_price:.2f}")
                         is_liquidated = True
+                        liquidation_loss = self._liquidation_loss(capital)
                         capital = 0
                         trades.append({
                             'time': timestamp.strftime('%Y-%m-%d %H:%M'),
                             'type': 'liquidation',
                             'price': round(liquidation_price, 4),
                             'amount': round(abs(position), 4),
-                            'profit': round(-initial_capital, 2),
+                            'profit': liquidation_loss,
                             'balance': 0
                         })
                         position = 0
@@ -3831,12 +4563,13 @@ import pandas as pd
                 if capital + profit <= 0:
                     logger.warning(f"Liquidation at backtest end! Close short loss too large: capital={capital:.2f}, loss={-profit:.2f}")
                     is_liquidated = True
+                    liquidation_loss = self._liquidation_loss(capital)
                     trades.append({
                         'time': timestamp.strftime('%Y-%m-%d %H:%M'),
                         'type': 'liquidation',
                         'price': round(exec_price, 4),
                         'amount': round(shares, 4),
-                        'profit': round(-capital, 2),
+                        'profit': liquidation_loss,
                         'balance': 0
                     })
                     capital = 0

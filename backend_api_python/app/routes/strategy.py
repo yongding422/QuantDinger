@@ -2,12 +2,15 @@
 Trading Strategy API Routes
 """
 from flask import Blueprint, request, jsonify, g
+from datetime import datetime
+import json
 import traceback
 import time
 
 from app.services.strategy import StrategyService
 from app.services.strategy_compiler import StrategyCompiler
 from app.services.backtest import BacktestService
+from app.services.strategy_snapshot import StrategySnapshotResolver
 from app import get_trading_executor
 from app.utils.logger import get_logger
 from app.utils.db import get_db_connection
@@ -21,12 +24,20 @@ strategy_bp = Blueprint('strategy', __name__)
 # Local mode: avoid heavy initialization during module import.
 # Instantiate services lazily on first use to keep startup clean.
 _strategy_service = None
+_backtest_service = None
 
 def get_strategy_service() -> StrategyService:
     global _strategy_service
     if _strategy_service is None:
         _strategy_service = StrategyService()
     return _strategy_service
+
+
+def get_backtest_service() -> BacktestService:
+    global _backtest_service
+    if _backtest_service is None:
+        _backtest_service = BacktestService()
+    return _backtest_service
 
 
 @strategy_bp.route('/strategies', methods=['GET'])
@@ -59,6 +70,168 @@ def get_strategy_detail():
         return jsonify({'code': 1, 'msg': 'success', 'data': st})
     except Exception as e:
         logger.error(f"get_strategy_detail failed: {str(e)}")
+        logger.error(traceback.format_exc())
+        return jsonify({'code': 0, 'msg': str(e), 'data': None}), 500
+
+
+@strategy_bp.route('/strategies/backtest', methods=['POST'])
+@login_required
+def run_strategy_backtest():
+    try:
+        payload = request.get_json() or {}
+        user_id = g.user_id
+        strategy_id = int(payload.get('strategyId') or 0)
+        if not strategy_id:
+            return jsonify({'code': 0, 'msg': 'strategyId is required', 'data': None}), 400
+
+        start_date_str = str(payload.get('startDate') or '').strip()
+        end_date_str = str(payload.get('endDate') or '').strip()
+        if not start_date_str or not end_date_str:
+            return jsonify({'code': 0, 'msg': 'startDate and endDate are required', 'data': None}), 400
+
+        strategy = get_strategy_service().get_strategy(strategy_id, user_id=user_id)
+        if not strategy:
+            return jsonify({'code': 0, 'msg': 'Strategy not found', 'data': None}), 404
+
+        resolver = StrategySnapshotResolver(user_id=user_id)
+        snapshot = resolver.resolve(strategy, payload.get('overrideConfig') or {})
+        snapshot['user_id'] = user_id
+
+        start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
+        end_date = datetime.strptime(end_date_str, '%Y-%m-%d').replace(hour=23, minute=59, second=59)
+
+        days_diff = (end_date - start_date).days
+        timeframe = snapshot.get('timeframe') or '1D'
+        if timeframe == '1m':
+            max_days = 30
+            max_range_text = '1 month'
+        elif timeframe == '5m':
+            max_days = 180
+            max_range_text = '6 months'
+        elif timeframe in ['15m', '30m']:
+            max_days = 365
+            max_range_text = '1 year'
+        else:
+            max_days = 1095
+            max_range_text = '3 years'
+        if days_diff > max_days:
+            return jsonify({
+                'code': 0,
+                'msg': f'Backtest range exceeds limit: timeframe {timeframe} supports up to {max_range_text} ({max_days} days), but you selected {days_diff} days',
+                'data': None
+            }), 400
+
+        svc = get_backtest_service()
+        result = svc.run_strategy_snapshot(snapshot, start_date=start_date, end_date=end_date)
+        run_id = svc.persist_run(
+            user_id=user_id,
+            indicator_id=snapshot.get('indicator_id'),
+            strategy_id=snapshot.get('strategy_id'),
+            strategy_name=snapshot.get('strategy_name') or '',
+            run_type=snapshot.get('run_type') or 'strategy_indicator',
+            market=snapshot.get('market') or '',
+            symbol=snapshot.get('symbol') or '',
+            timeframe=snapshot.get('timeframe') or '',
+            start_date_str=start_date_str,
+            end_date_str=end_date_str,
+            initial_capital=float(snapshot.get('initial_capital') or 0),
+            commission=float(snapshot.get('commission') or 0),
+            slippage=float(snapshot.get('slippage') or 0),
+            leverage=int(snapshot.get('leverage') or 1),
+            trade_direction=str(snapshot.get('trade_direction') or 'long'),
+            strategy_config=snapshot.get('strategy_config') or {},
+            config_snapshot=snapshot.get('config_snapshot') or {},
+            status='success',
+            error_message='',
+            result=result,
+            code=snapshot.get('code') or '',
+        )
+        return jsonify({'code': 1, 'msg': 'success', 'data': {'runId': run_id, 'result': result}})
+    except ValueError as e:
+        return jsonify({'code': 0, 'msg': str(e), 'data': None}), 400
+    except Exception as e:
+        logger.error(f"run_strategy_backtest failed: {str(e)}")
+        logger.error(traceback.format_exc())
+        try:
+            payload = payload if isinstance(payload, dict) else {}
+            strategy_id = int(payload.get('strategyId') or 0)
+            strategy = get_strategy_service().get_strategy(strategy_id, user_id=g.user_id) if strategy_id else None
+            if strategy:
+                resolver = StrategySnapshotResolver(user_id=g.user_id)
+                snapshot = resolver.resolve(strategy, payload.get('overrideConfig') or {})
+                snapshot['user_id'] = g.user_id
+                get_backtest_service().persist_run(
+                    user_id=g.user_id,
+                    indicator_id=snapshot.get('indicator_id'),
+                    strategy_id=snapshot.get('strategy_id'),
+                    strategy_name=snapshot.get('strategy_name') or '',
+                    run_type=snapshot.get('run_type') or 'strategy_indicator',
+                    market=snapshot.get('market') or '',
+                    symbol=snapshot.get('symbol') or '',
+                    timeframe=snapshot.get('timeframe') or '',
+                    start_date_str=str(payload.get('startDate') or ''),
+                    end_date_str=str(payload.get('endDate') or ''),
+                    initial_capital=float(snapshot.get('initial_capital') or 0),
+                    commission=float(snapshot.get('commission') or 0),
+                    slippage=float(snapshot.get('slippage') or 0),
+                    leverage=int(snapshot.get('leverage') or 1),
+                    trade_direction=str(snapshot.get('trade_direction') or 'long'),
+                    strategy_config=snapshot.get('strategy_config') or {},
+                    config_snapshot=snapshot.get('config_snapshot') or {},
+                    status='failed',
+                    error_message=str(e),
+                    result=None,
+                    code=snapshot.get('code') or '',
+                )
+        except Exception:
+            pass
+        return jsonify({'code': 0, 'msg': str(e), 'data': None}), 500
+
+
+@strategy_bp.route('/strategies/backtest/history', methods=['GET'])
+@login_required
+def get_strategy_backtest_history():
+    try:
+        user_id = g.user_id
+        strategy_id = int(request.args.get('strategyId') or request.args.get('id') or 0)
+        if not strategy_id:
+            return jsonify({'code': 0, 'msg': 'strategyId is required', 'data': None}), 400
+        limit = max(1, min(int(request.args.get('limit') or 50), 200))
+        offset = max(0, int(request.args.get('offset') or 0))
+        symbol = (request.args.get('symbol') or '').strip()
+        market = (request.args.get('market') or '').strip()
+        timeframe = (request.args.get('timeframe') or '').strip()
+        rows = get_backtest_service().list_runs(
+            user_id=user_id,
+            strategy_id=strategy_id,
+            limit=limit,
+            offset=offset,
+            symbol=symbol,
+            market=market,
+            timeframe=timeframe,
+        )
+        rows = [r for r in rows if str(r.get('run_type') or '').startswith('strategy_')]
+        return jsonify({'code': 1, 'msg': 'success', 'data': rows})
+    except Exception as e:
+        logger.error(f"get_strategy_backtest_history failed: {str(e)}")
+        logger.error(traceback.format_exc())
+        return jsonify({'code': 0, 'msg': str(e), 'data': None}), 500
+
+
+@strategy_bp.route('/strategies/backtest/get', methods=['GET'])
+@login_required
+def get_strategy_backtest_run():
+    try:
+        user_id = g.user_id
+        run_id = int(request.args.get('runId') or 0)
+        if not run_id:
+            return jsonify({'code': 0, 'msg': 'runId is required', 'data': None}), 400
+        row = get_backtest_service().get_run(user_id=user_id, run_id=run_id)
+        if not row or not str(row.get('run_type') or '').startswith('strategy_'):
+            return jsonify({'code': 0, 'msg': 'run not found', 'data': None}), 404
+        return jsonify({'code': 1, 'msg': 'success', 'data': row})
+    except Exception as e:
+        logger.error(f"get_strategy_backtest_run failed: {str(e)}")
         logger.error(traceback.format_exc())
         return jsonify({'code': 0, 'msg': str(e), 'data': None}), 500
 
@@ -695,7 +868,7 @@ def test_connection():
             return jsonify({'code': 0, 'msg': 'Please provide API key and secret key', 'data': None})
         
         # Pass the resolved config (with actual keys) to the service
-        result = get_strategy_service().test_exchange_connection(resolved)
+        result = get_strategy_service().test_exchange_connection(resolved, user_id=user_id)
         
         if result['success']:
             return jsonify({'code': 1, 'msg': result.get('message') or 'Connection successful', 'data': result.get('data')})
@@ -1079,9 +1252,12 @@ def ai_generate_strategy():
 Generate Python strategy code that follows this framework:
 - def on_init(ctx): Initialize strategy parameters using ctx.param(name, default)
 - def on_bar(ctx, bar): Core logic called on each K-line bar
-  - bar has: open, high, low, close, volume, timestamp
+  - bar supports both bar.close and bar['close'] access, and has: open, high, low, close, volume, timestamp
   - ctx.buy(price, amount), ctx.sell(price, amount), ctx.close_position()
-  - ctx.position (current position), ctx.balance, ctx.equity
+  - ctx.position supports both numeric checks and dict-style fields:
+    - if not ctx.position / if ctx.position > 0 / if ctx.position < 0
+    - ctx.position['side'], ctx.position['size'], ctx.position['entry_price']
+  - ctx.balance, ctx.equity
   - ctx.bars(n) to get last N bars, ctx.log(message) to log
 - def on_order_filled(ctx, order): Optional callback when order fills
 - def on_stop(ctx): Optional cleanup when strategy stops

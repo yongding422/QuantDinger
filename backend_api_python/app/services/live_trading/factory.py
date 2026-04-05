@@ -2,7 +2,7 @@
 Factory for direct exchange clients.
 
 Supports:
-- Crypto exchanges: Binance, OKX, Bitget, Bybit, Coinbase, Kraken, KuCoin, Gate, Bitfinex
+- Crypto exchanges: Binance, OKX, Bitget, Bybit, Coinbase, Kraken, KuCoin, Gate, Bitfinex, Deepcoin, HTX
 - Traditional brokers: Interactive Brokers (IBKR) for US stocks
 - Forex brokers: MetaTrader 5 (MT5)
 """
@@ -25,6 +25,7 @@ from app.services.live_trading.kucoin import KucoinSpotClient, KucoinFuturesClie
 from app.services.live_trading.gate import GateSpotClient, GateUsdtFuturesClient
 from app.services.live_trading.bitfinex import BitfinexClient, BitfinexDerivativesClient
 from app.services.live_trading.deepcoin import DeepcoinClient
+from app.services.live_trading.htx import HtxClient
 
 # Lazy import IBKR to avoid ImportError if ib_insync not installed
 IBKRClient = None
@@ -68,14 +69,16 @@ def create_client(exchange_config: Dict[str, Any], *, market_type: str = "swap")
     is_demo = _demo_enabled(exchange_config)
 
     if exchange_id == "binance":
+        spot_broker_id = _get(exchange_config, "spot_broker_id", "spotBrokerId", "broker_id", "brokerId") or "A2NAPZAC"
+        futures_broker_id = _get(exchange_config, "futures_broker_id", "futuresBrokerId", "broker_id", "brokerId") or "HBpUbQjT"
         if mt == "spot":
             default_url = "https://demo-api.binance.com" if is_demo else "https://api.binance.com"
             base_url = _get(exchange_config, "base_url", "baseUrl") or default_url
-            return BinanceSpotClient(api_key=api_key, secret_key=secret_key, base_url=base_url, enable_demo_trading=is_demo)
+            return BinanceSpotClient(api_key=api_key, secret_key=secret_key, base_url=base_url, enable_demo_trading=is_demo, broker_id=spot_broker_id)
         # Default to USDT-M futures
         default_url = "https://demo-fapi.binance.com" if is_demo else "https://fapi.binance.com"
         base_url = _get(exchange_config, "base_url", "baseUrl") or default_url
-        return BinanceFuturesClient(api_key=api_key, secret_key=secret_key, base_url=base_url, enable_demo_trading=is_demo)
+        return BinanceFuturesClient(api_key=api_key, secret_key=secret_key, base_url=base_url, enable_demo_trading=is_demo, broker_id=futures_broker_id)
     if exchange_id == "okx":
         base_url = _get(exchange_config, "base_url", "baseUrl") or "https://www.okx.com"
         broker_code = "56fa80b0ce8cBCDE"
@@ -92,21 +95,48 @@ def create_client(exchange_config: Dict[str, Any], *, market_type: str = "swap")
         base_url = _get(exchange_config, "base_url", "baseUrl") or "https://api.bitget.com"
         if mt == "spot":
             channel_api_code = _get(exchange_config, "channel_api_code", "channelApiCode") or "qvz9x"
-            return BitgetSpotClient(api_key=api_key, secret_key=secret_key, passphrase=passphrase, base_url=base_url, channel_api_code=channel_api_code)
+            return BitgetSpotClient(
+                api_key=api_key,
+                secret_key=secret_key,
+                passphrase=passphrase,
+                base_url=base_url,
+                channel_api_code=channel_api_code,
+                simulated_trading=is_demo,
+            )
         channel_api_code = _get(exchange_config, "channel_api_code", "channelApiCode") or "qvz9x"
-        return BitgetMixClient(api_key=api_key, secret_key=secret_key, passphrase=passphrase, base_url=base_url, channel_api_code=channel_api_code)
+        return BitgetMixClient(
+            api_key=api_key,
+            secret_key=secret_key,
+            passphrase=passphrase,
+            base_url=base_url,
+            channel_api_code=channel_api_code,
+            simulated_trading=is_demo,
+        )
 
     if exchange_id == "bybit":
         default_bybit = "https://api-testnet.bybit.com" if is_demo else "https://api.bybit.com"
         base_url = _get(exchange_config, "base_url", "baseUrl") or default_bybit
         category = "spot" if mt == "spot" else "linear"
         recv_window_ms = int(exchange_config.get("recv_window_ms") or exchange_config.get("recvWindow") or 5000)
+        broker_referer = _get(exchange_config, "bybit_referer", "broker_referer", "brokerReferer") or "Ri001020"
+        hedge_mode_raw = exchange_config.get("hedge_mode")
+        if hedge_mode_raw is None:
+            hedge_mode_raw = exchange_config.get("hedgeMode")
+        if hedge_mode_raw is None:
+            hedge_mode_raw = exchange_config.get("position_mode") or exchange_config.get("positionMode")
+        hedge_mode = False
+        if isinstance(hedge_mode_raw, bool):
+            hedge_mode = hedge_mode_raw
+        else:
+            hedge_mode = str(hedge_mode_raw or "").strip().lower() in ("true", "1", "yes", "hedge", "both_side")
         return BybitClient(
             api_key=api_key,
             secret_key=secret_key,
             base_url=base_url,
             category=category,
             recv_window_ms=recv_window_ms,
+            broker_referer=broker_referer,
+            hedge_mode=hedge_mode,
         )
 
     if exchange_id in ("coinbaseexchange", "coinbase_exchange"):
@@ -135,13 +165,14 @@ def create_client(exchange_config: Dict[str, Any], *, market_type: str = "swap")
         return KucoinFuturesClient(api_key=api_key, secret_key=secret_key, passphrase=passphrase, base_url=fut_url)
 
     if exchange_id == "gate":
+        gate_channel_id = _get(exchange_config, "gate_channel_id", "gateChannelId") or "dinger"
         if mt == "spot":
             default_gate = "https://api-testnet.gateio.ws" if is_demo else "https://api.gateio.ws"
             base_url = _get(exchange_config, "base_url", "baseUrl") or default_gate
-            return GateSpotClient(api_key=api_key, secret_key=secret_key, base_url=base_url)
-        default_fut = "https://fx-api-testnet.gateio.ws" if is_demo else "https://api.gateio.ws"
+            return GateSpotClient(api_key=api_key, secret_key=secret_key, base_url=base_url, channel_id=gate_channel_id)
+        default_fut = "https://fx-api-testnet.gateio.ws" if is_demo else "https://fx-api.gateio.ws"
         base_url = _get(exchange_config, "base_url", "baseUrl") or default_fut
-        return GateUsdtFuturesClient(api_key=api_key, secret_key=secret_key, base_url=base_url)
+        return GateUsdtFuturesClient(api_key=api_key, secret_key=secret_key, base_url=base_url, channel_id=gate_channel_id)
 
     if exchange_id == "bitfinex":
         # Same REST host; use keys from Bitfinex paper/sub-account where applicable.
@@ -151,6 +182,8 @@ def create_client(exchange_config: Dict[str, Any], *, market_type: str = "swap")
         return BitfinexDerivativesClient(api_key=api_key, secret_key=secret_key, base_url=base_url)
 
     if exchange_id == "deepcoin":
+        if is_demo and not (_get(exchange_config, "base_url", "baseUrl")):
+            raise LiveTradingError("Deepcoin demo/testnet is not configured in this project yet. Please disable demo mode or provide an explicit testnet base_url.")
         base_url = _get(exchange_config, "base_url", "baseUrl") or "https://api.deepcoin.com"
         return DeepcoinClient(
             api_key=api_key,
@@ -158,6 +191,21 @@ def create_client(exchange_config: Dict[str, Any], *, market_type: str = "swap")
             passphrase=passphrase,
             base_url=base_url,
             market_type=mt,
+        )
+
+    if exchange_id == "htx":
+        if is_demo and not (_get(exchange_config, "base_url", "baseUrl") or _get(exchange_config, "futures_base_url", "futuresBaseUrl")):
+            raise LiveTradingError("HTX demo/testnet is not configured in this project yet. Please disable demo mode or provide explicit testnet base_url/futures_base_url.")
+        spot_url = _get(exchange_config, "base_url", "baseUrl") or "https://api.huobi.pro"
+        futures_url = _get(exchange_config, "futures_base_url", "futuresBaseUrl") or "https://api.hbdm.com"
+        broker_id = _get(exchange_config, "broker_id", "brokerId") or "AA7b890547"
+        return HtxClient(
+            api_key=api_key,
+            secret_key=secret_key,
+            base_url=spot_url,
+            futures_base_url=futures_url,
+            market_type=mt,
+            broker_id=broker_id,
         )
 
     # Traditional brokers (IBKR for US stocks only)

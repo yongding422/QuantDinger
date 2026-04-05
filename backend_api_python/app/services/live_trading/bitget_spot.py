@@ -41,12 +41,14 @@ class BitgetSpotClient(BaseRestClient):
         base_url: str = "https://api.bitget.com",
         timeout_sec: float = 15.0,
         channel_api_code: str = "qvz9x",
+        simulated_trading: bool = False,
     ):
         super().__init__(base_url=base_url, timeout_sec=timeout_sec)
         self.api_key = (api_key or "").strip()
         self.secret_key = (secret_key or "").strip()
         self.passphrase = (passphrase or "").strip()
         self.channel_api_code = (channel_api_code or "").strip()
+        self.simulated_trading = bool(simulated_trading)
         if not self.api_key or not self.secret_key or not self.passphrase:
             raise LiveTradingError("Missing Bitget api_key/secret_key/passphrase")
 
@@ -167,6 +169,8 @@ class BitgetSpotClient(BaseRestClient):
             "ACCESS-PASSPHRASE": self.passphrase,
             "Content-Type": "application/json",
         }
+        if self.simulated_trading:
+            h["PAPTRADING"] = "1"
         clean_path = str(request_path or "").split("?", 1)[0]
         if self.channel_api_code and clean_path in self._CHANNEL_API_CODE_ORDER_PATHS:
             h["X-CHANNEL-API-CODE"] = self.channel_api_code
@@ -473,5 +477,15 @@ class BitgetSpotClient(BaseRestClient):
         Endpoint: GET /api/v2/spot/account/assets
         """
         return self._signed_request("GET", "/api/v2/spot/account/assets")
+
+    def get_ticker(self, *, symbol: str) -> Dict[str, Any]:
+        sym = to_bitget_um_symbol(symbol)
+        raw = self._public_request("GET", "/api/v2/spot/market/tickers", params={"symbol": sym})
+        data = raw.get("data") if isinstance(raw, dict) else None
+        if isinstance(data, list) and data and isinstance(data[0], dict):
+            return data[0]
+        if isinstance(data, dict):
+            return data
+        return {}
 
 

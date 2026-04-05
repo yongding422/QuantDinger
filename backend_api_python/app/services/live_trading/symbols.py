@@ -236,3 +236,28 @@ def to_deepcoin_swap_symbol(symbol: str) -> str:
         return base_symbol
     return f"{base_symbol}-SWAP"
 
+
+def to_htx_spot_symbol(symbol: str) -> str:
+    """
+    HTX spot symbol format: lowercase concatenated, e.g. btcusdt.
+    """
+    base, quote = _split_base_quote(symbol)
+    if not base or not quote:
+        return str(symbol or "").replace("/", "").replace(":", "").lower()
+    return f"{base}{quote}".lower()
+
+
+def to_htx_contract_code(symbol: str) -> str:
+    """
+    HTX USDT-margined swap contract code: BASE-QUOTE, e.g. BTC-USDT.
+    """
+    s = str(symbol or "").strip()
+    if not s:
+        return s
+    if "-" in s and "/" not in s:
+        return s.upper()
+    base, quote = _split_base_quote(symbol)
+    if not base or not quote:
+        return s.replace("/", "-").replace(":", "-").upper()
+    return f"{base}-{quote}"
+

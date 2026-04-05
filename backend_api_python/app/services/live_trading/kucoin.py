@@ -86,6 +86,11 @@ class KucoinSpotClient(BaseRestClient):
     def get_accounts(self) -> Any:
         return self._signed_request("GET", "/api/v1/accounts")
 
+    def get_ticker(self, *, symbol: str) -> Dict[str, Any]:
+        raw = self._public_request("GET", "/api/v1/market/orderbook/level1", params={"symbol": to_kucoin_symbol(symbol)})
+        data = raw.get("data") if isinstance(raw, dict) else None
+        return data if isinstance(data, dict) else {}
+
     def place_limit_order(self, *, symbol: str, side: str, size: float, price: float, client_order_id: Optional[str] = None) -> LiveOrderResult:
         sd = (side or "").strip().lower()
         if sd not in ("buy", "sell"):

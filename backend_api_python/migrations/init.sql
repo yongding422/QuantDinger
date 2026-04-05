@@ -432,6 +432,9 @@ CREATE TABLE IF NOT EXISTS qd_backtest_runs (
     id SERIAL PRIMARY KEY,
     user_id INTEGER NOT NULL DEFAULT 1 REFERENCES qd_users(id) ON DELETE CASCADE,
     indicator_id INTEGER,
+    strategy_id INTEGER,
+    strategy_name VARCHAR(255) DEFAULT '',
+    run_type VARCHAR(50) DEFAULT 'indicator',
     market VARCHAR(50) NOT NULL DEFAULT '',
     symbol VARCHAR(50) NOT NULL DEFAULT '',
     timeframe VARCHAR(10) NOT NULL DEFAULT '',
@@ -443,6 +446,9 @@ CREATE TABLE IF NOT EXISTS qd_backtest_runs (
     leverage INTEGER DEFAULT 1,
     trade_direction VARCHAR(20) DEFAULT 'long',
     strategy_config TEXT DEFAULT '',
+    config_snapshot TEXT DEFAULT '',
+    engine_version VARCHAR(50) DEFAULT '',
+    code_hash VARCHAR(128) DEFAULT '',
     status VARCHAR(20) DEFAULT 'success',
     error_message TEXT DEFAULT '',
     result_json TEXT DEFAULT '',
@@ -451,6 +457,39 @@ CREATE TABLE IF NOT EXISTS qd_backtest_runs (
 
 CREATE INDEX IF NOT EXISTS idx_backtest_runs_user_id ON qd_backtest_runs(user_id);
 CREATE INDEX IF NOT EXISTS idx_backtest_runs_indicator_id ON qd_backtest_runs(indicator_id);
+CREATE INDEX IF NOT EXISTS idx_backtest_runs_strategy_id ON qd_backtest_runs(strategy_id);
+CREATE INDEX IF NOT EXISTS idx_backtest_runs_run_type ON qd_backtest_runs(run_type);
+
+CREATE TABLE IF NOT EXISTS qd_backtest_trades (
+    id SERIAL PRIMARY KEY,
+    run_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL DEFAULT 1 REFERENCES qd_users(id) ON DELETE CASCADE,
+    strategy_id INTEGER,
+    trade_index INTEGER DEFAULT 0,
+    trade_time VARCHAR(64) DEFAULT '',
+    trade_type VARCHAR(64) DEFAULT '',
+    side VARCHAR(32) DEFAULT '',
+    price DOUBLE PRECISION DEFAULT 0,
+    amount DOUBLE PRECISION DEFAULT 0,
+    profit DOUBLE PRECISION DEFAULT 0,
+    balance DOUBLE PRECISION DEFAULT 0,
+    reason VARCHAR(64) DEFAULT '',
+    payload_json TEXT DEFAULT '',
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_backtest_trades_run_id ON qd_backtest_trades(run_id);
+
+CREATE TABLE IF NOT EXISTS qd_backtest_equity_points (
+    id SERIAL PRIMARY KEY,
+    run_id INTEGER NOT NULL,
+    point_index INTEGER DEFAULT 0,
+    point_time VARCHAR(64) DEFAULT '',
+    point_value DOUBLE PRECISION DEFAULT 0,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_backtest_equity_points_run_id ON qd_backtest_equity_points(run_id);
 
 -- =============================================================================
 -- 13. Exchange Credentials

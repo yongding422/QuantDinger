@@ -25,10 +25,11 @@ from app.services.live_trading.symbols import to_gate_currency_pair
 
 
 class _GateBase(BaseRestClient):
-    def __init__(self, *, api_key: str, secret_key: str, base_url: str = "https://api.gateio.ws", timeout_sec: float = 15.0):
+    def __init__(self, *, api_key: str, secret_key: str, base_url: str = "https://api.gateio.ws", timeout_sec: float = 15.0, channel_id: str = ""):
         super().__init__(base_url=base_url, timeout_sec=timeout_sec)
         self.api_key = (api_key or "").strip()
         self.secret_key = (secret_key or "").strip()
+        self.channel_id = (channel_id or "").strip()
         if not self.api_key or not self.secret_key:
             raise LiveTradingError("Missing Gate api_key/secret_key")
 
@@ -37,7 +38,25 @@ class _GateBase(BaseRestClient):
         return hmac.new(self.secret_key.encode("utf-8"), msg.encode("utf-8"), hashlib.sha512).hexdigest()
 
     def _headers(self, ts: str, sign: str) -> Dict[str, str]:
-        return {"KEY": self.api_key, "Timestamp": ts, "SIGN": sign, "Content-Type": "application/json"}
+        headers = {"KEY": self.api_key, "Timestamp": ts, "SIGN": sign, "Content-Type": "application/json"}
+        if self.channel_id:
+            headers["X-Gate-Channel-Id"] = self.channel_id[:19]
+        return headers
+
+    def _format_text(self, client_order_id: Optional[str]) -> str:
+        raw = str(client_order_id or "").strip()
+        if not raw:
+            return ""
+        normalized = []
+        for ch in raw:
+            if ch.isalnum() or ch in ("-", "_", "."):
+                normalized.append(ch)
+        text = "".join(normalized).strip()
+        if not text:
+            return ""
+        if not text.startswith("t-"):
+            text = f"t-{text}"
+        return text[:28]
 
     def _signed_request(self, method: str, path: str, *, params: Optional[Dict[str, Any]] = None, json_body: Optional[Dict[str, Any]] = None) -> Any:
         m = str(method or "GET").upper()
@@ -87,8 +106,9 @@ class GateSpotClient(_GateBase):
             "price": str(px),
             "time_in_force": "gtc",
         }
-        if client_order_id:
-            body["text"] = str(client_order_id)
+        text = self._format_text(client_order_id)
+        if text:
+            body["text"] = text
         raw = self._signed_request("POST", "/api/v4/spot/orders", json_body=body)
         oid = str(raw.get("id") or "") if isinstance(raw, dict) else ""
         return LiveOrderResult(exchange_id="gate", exchange_order_id=oid, filled=0.0, avg_price=0.0, raw=raw if isinstance(raw, dict) else {"raw": raw})
@@ -106,8 +126,9 @@ class GateSpotClient(_GateBase):
             "type": "market",
             "amount": str(qty),
         }
-        if client_order_id:
-            body["text"] = str(client_order_id)
+        text = self._format_text(client_order_id)
+        if text:
+            body["text"] = text
         raw = self._signed_request("POST", "/api/v4/spot/orders", json_body=body)
         oid = str(raw.get("id") or "") if isinstance(raw, dict) else ""
         return LiveOrderResult(exchange_id="gate", exchange_order_id=oid, filled=0.0, avg_price=0.0, raw=raw if isinstance(raw, dict) else {"raw": raw})
@@ -162,8 +183,8 @@ class GateSpotClient(_GateBase):
 
 
 class GateUsdtFuturesClient(_GateBase):
-    def __init__(self, *, api_key: str, secret_key: str, base_url: str = "https://api.gateio.ws", timeout_sec: float = 15.0):
-        super().__init__(api_key=api_key, secret_key=secret_key, base_url=base_url, timeout_sec=timeout_sec)
+    def __init__(self, *, api_key: str, secret_key: str, base_url: str = "https://api.gateio.ws", timeout_sec: float = 15.0, channel_id: str = ""):
+        super().__init__(api_key=api_key, secret_key=secret_key, base_url=base_url, timeout_sec=timeout_sec, channel_id=channel_id)
         # Best-effort cache for contract metadata to convert base qty -> contracts.
         self._contract_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
         self._contract_cache_ttl_sec = 300.0
@@ -263,8 +284,9 @@ class GateUsdtFuturesClient(_GateBase):
         body: Dict[str, Any] = {"contract": contract, "size": signed_size, "price": "0", "tif": "ioc"}
         if reduce_only:
             body["reduce_only"] = True
-        if client_order_id:
-            body["text"] = str(client_order_id)
+        text = self._format_text(client_order_id)
+        if text:
+            body["text"] = text
         raw = self._signed_request("POST", "/api/v4/futures/usdt/orders", json_body=body)
         oid = str(raw.get("id") or "") if isinstance(raw, dict) else ""
         return LiveOrderResult(exchange_id="gate", exchange_order_id=oid, filled=0.0, avg_price=0.0, raw=raw if isinstance(raw, dict) else {"raw": raw})
@@ -293,8 +315,9 @@ class GateUsdtFuturesClient(_GateBase):
         body: Dict[str, Any] = {"contract": contract, "size": signed_size, "price": str(px), "tif": "gtc"}
         if reduce_only:
             body["reduce_only"] = True
-        if client_order_id:
-            body["text"] = str(client_order_id)
+        text = self._format_text(client_order_id)
+        if text:
+            body["text"] = text
         raw = self._signed_request("POST", "/api/v4/futures/usdt/orders", json_body=body)
         oid = str(raw.get("id") or "") if isinstance(raw, dict) else ""
         return LiveOrderResult(exchange_id="gate", exchange_order_id=oid, filled=0.0, avg_price=0.0, raw=raw if isinstance(raw, dict) else {"raw": raw})

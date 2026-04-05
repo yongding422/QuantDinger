@@ -29,7 +29,7 @@
 
   <p>
     <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg?style=flat-square&logo=apache" alt="License"></a>
-    <img src="https://img.shields.io/badge/Version-2.2.3-orange?style=flat-square" alt="Version">
+    <img src="https://img.shields.io/badge/Version-3.0.1-orange?style=flat-square" alt="Version">
     <img src="https://img.shields.io/badge/Python-3.10+-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python">
     <img src="https://img.shields.io/badge/Docker-One%20Click-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker">
     <img src="https://img.shields.io/badge/Vibe%20Coding-Ready-FF6B6B?style=flat-square&logo=sparkles&logoColor=white" alt="Vibe Coding">
@@ -53,6 +53,7 @@
 - [🎯 Why QuantDinger?](#-why-quantdinger)
 - [📸 Visual Tour](#-visual-tour--watch-video-demo)
 - [✨ Key Features](#-key-features)
+- [🔗 QuantDinger exchange signup (referral)](#quantdinger-exchange-signup-referral)
 - [🔌 Supported Exchanges & Brokers](#-supported-exchanges--brokers)
 - [🏗️ Architecture & Configuration](#️-architecture--configuration)
 - [📚 Documentation Index](#-documentation-index)
@@ -394,6 +395,23 @@ flowchart TB
 
 ---
 
+## 🔗 QuantDinger exchange signup (referral)
+
+These are **QuantDinger** partner / invite links. Registering through them may qualify you for trading fee rebates (for example up to about **20%** commission rebate — subject to each exchange’s rules and campaigns).
+
+| Exchange | Invite / signup link |
+|----------|----------------------|
+| Binance | [Register](https://www.bsmkweb.cc/register?ref=QUANTDINGER) |
+| Bitget | [Register](https://partner.hdmune.cn/bg/7r4xz8kd) |
+| Bybit | [Register](https://partner.bybit.com/b/DINGER) |
+| OKX | [Register](https://www.xqmnobxky.com/join/QUANTDINGER) |
+| Gate.io | [Register](https://www.gateport.company/share/DINGER) |
+| HTX | [Register](https://www.htx.com/invite/zh-cn/1f?invite_code=dinger) |
+
+The same links are available in the web app under **Profile → Open account** (after sign-in).
+
+---
+
 ## 🔌 Supported Exchanges & Brokers
 
 ### Cryptocurrency (Direct API Trading)
@@ -418,13 +436,9 @@ flowchart TB
 | **Forex** | MetaTrader 5 (MT5), OANDA | ✅ Via MT5 |
 | **Futures** | Exchange APIs | ⚡ Data + Notify |
 
-### Exchange Rebate Links
+### Exchange rebate links
 
-If you are opening a new exchange account, use a rebate link from the start. Many traders actively look for fee-rebate links anyway, and these links give you a straightforward 20% trading fee discount at no extra cost.
-
-- **OKX**: [Open account with 20% fee rebate](https://www.promooboost.com/join/QUANTDINGER)
-- **Bitget**: [Open account with 20% fee rebate](https://partner.bitget.com/bg/dinger)
-- **Bitget (backup link)**: [Alternate 20% fee rebate signup link](https://partner.hdmune.cn/bg/7r4xz8kd)
+See the dedicated section: [QuantDinger exchange signup (referral)](#quantdinger-exchange-signup-referral).
 
 ---
 

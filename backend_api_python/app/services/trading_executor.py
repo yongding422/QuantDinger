@@ -2039,7 +2039,13 @@ class TradingExecutor:
                     return False
 
             # 2. 计算下单数量
-            available_capital = self._get_available_capital(strategy_id, initial_capital)
+            available_capital = self._get_available_capital(
+                strategy_id,
+                initial_capital,
+                current_positions=current_positions,
+                current_price=current_price,
+                symbol=symbol,
+            )
             
             amount = 0.0
 
@@ -2655,12 +2661,83 @@ class TradingExecutor:
     def _place_stop_loss_order(self, *args, **kwargs):
         pass
 
-    def _get_available_capital(self, strategy_id: int, initial_capital: float) -> float:
-        """获取可用资金"""
-        return initial_capital
+    def _get_available_capital(
+        self,
+        strategy_id: int,
+        initial_capital: float,
+        current_positions: Optional[List[Dict[str, Any]]] = None,
+        current_price: Optional[float] = None,
+        symbol: str = "",
+    ) -> float:
+        """获取当前策略可用于仓位计算的净值口径资金。"""
+        return self._calculate_current_equity(
+            strategy_id,
+            initial_capital,
+            current_positions=current_positions,
+            current_price=current_price,
+            symbol=symbol,
+        )
 
-    def _calculate_current_equity(self, strategy_id: int, initial_capital: float) -> float:
-        return initial_capital
+    def _calculate_current_equity(
+        self,
+        strategy_id: int,
+        initial_capital: float,
+        current_positions: Optional[List[Dict[str, Any]]] = None,
+        current_price: Optional[float] = None,
+        symbol: str = "",
+    ) -> float:
+        realized_pnl = 0.0
+        unrealized_pnl = 0.0
+        try:
+            with get_db_connection() as db:
+                cursor = db.cursor()
+                cursor.execute(
+                    """
+                    SELECT COALESCE(SUM(COALESCE(profit, 0) - COALESCE(commission, 0)), 0) AS realized_pnl
+                    FROM qd_strategy_trades
+                    WHERE strategy_id = %s
+                    """,
+                    (strategy_id,)
+                )
+                row = cursor.fetchone() or {}
+                realized_pnl = float(row.get('realized_pnl') or 0.0)
+                cursor.close()
+        except Exception as e:
+            logger.warning(f"Failed to calculate realized pnl for strategy {strategy_id}: {e}")
+
+        positions = list(current_positions or [])
+        if not positions:
+            try:
+                positions = self._get_all_positions(strategy_id) or []
+            except Exception:
+                positions = []
+
+        normalized_symbol = (symbol or "").split(':')[0]
+        for pos in positions:
+            try:
+                side = str(pos.get('side') or '').strip().lower()
+                size = float(pos.get('size') or 0.0)
+                entry_price = float(pos.get('entry_price') or 0.0)
+                if size <= 0 or entry_price <= 0 or side not in ('long', 'short'):
+                    continue
+
+                mark_price = pos.get('current_price')
+                pos_symbol = str(pos.get('symbol') or '')
+                if current_price and normalized_symbol and pos_symbol.split(':')[0] == normalized_symbol:
+                    mark_price = current_price
+                mark_price = float(mark_price or 0.0)
+                if mark_price <= 0:
+                    continue
+
+                if side == 'long':
+                    unrealized_pnl += (mark_price - entry_price) * size
+                else:
+                    unrealized_pnl += (entry_price - mark_price) * size
+            except Exception:
+                continue
+
+        equity = float(initial_capital or 0.0) + realized_pnl + unrealized_pnl
+        return max(0.0, equity)
 
     def _record_trade(self, strategy_id: int, symbol: str, type: str, price: float, amount: float, value: float, profit: float = None, commission: float = None):
         """记录交易到数据库"""

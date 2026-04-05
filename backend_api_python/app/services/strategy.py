@@ -257,7 +257,7 @@ class StrategyService:
             logger.error(f"Failed to fetch symbols: {str(e)}")
             return {'success': False, 'message': f'Failed to get trading pairs: {str(e)}', 'symbols': []}
     
-    def test_exchange_connection(self, exchange_config: Dict[str, Any]) -> Dict[str, Any]:
+    def test_exchange_connection(self, exchange_config: Dict[str, Any], user_id: int = 1) -> Dict[str, Any]:
         """
         Test exchange connection via direct REST clients (no ccxt).
 
@@ -284,8 +284,9 @@ class StrategyService:
                 from app.services.live_trading.gate import GateSpotClient, GateUsdtFuturesClient
                 from app.services.live_trading.bitfinex import BitfinexClient, BitfinexDerivativesClient
                 from app.services.live_trading.deepcoin import DeepcoinClient
+                from app.services.live_trading.htx import HtxClient
 
-                resolved = resolve_exchange_config(exchange_config or {})
+                resolved = resolve_exchange_config(exchange_config or {}, user_id=user_id)
                 safe_cfg = safe_exchange_config_for_log(resolved)
 
                 exchange_id = (resolved.get("exchange_id") or "").strip().lower()
@@ -370,13 +371,6 @@ class StrategyService:
                             'data': {'exchange': safe_cfg}
                         }
 
-                # IMPORTANT:
-                # Test connection should respect configured market_type (spot vs swap).
-                # Otherwise Binance will default to futures endpoints (fapi) and spot-only keys will fail with -2015.
-                market_type = str(resolved.get("market_type") or resolved.get("defaultType") or "swap").strip().lower()
-                client = create_client(resolved, market_type=market_type)
-                client_kind = type(client).__name__
-
                 # Best-effort detect current egress IP (for Binance IP whitelist debugging).
                 egress_ip = ""
                 try:
@@ -385,113 +379,163 @@ class StrategyService:
                 except Exception:
                     egress_ip = ""
 
-                # 1) Public connectivity
-                ok_public = False
-                try:
-                    ok_public = bool(getattr(client, "ping")())
-                except Exception:
-                    ok_public = False
-                if not ok_public:
-                    return {
-                        'success': False,
-                        'message': f'Public ping failed: {exchange_id}',
-                        'data': {'exchange': safe_cfg, 'client': client_kind, 'market_type': market_type, 'egress_ip': egress_ip},
-                    }
-
-                # 2) Private credential validation (best-effort)
-                priv_data = None
-                try:
+                def _validate_private(client, market_type: str):
                     if isinstance(client, BinanceFuturesClient):
-                        priv_data = client.get_account()
-                    elif isinstance(client, BinanceSpotClient):
-                        priv_data = client.get_account()
-                    elif isinstance(client, OkxClient):
-                        priv_data = client.get_balance()
-                    elif isinstance(client, BitgetMixClient):
+                        return client.get_account()
+                    if isinstance(client, BinanceSpotClient):
+                        return client.get_account()
+                    if isinstance(client, OkxClient):
+                        return client.get_balance()
+                    if isinstance(client, BitgetMixClient):
                         product_type = str(resolved.get("product_type") or resolved.get("productType") or "USDT-FUTURES")
-                        priv_data = client.get_accounts(product_type=product_type)
-                    elif isinstance(client, BitgetSpotClient):
-                        priv_data = client.get_assets()
-                    elif isinstance(client, BybitClient):
-                        priv_data = client.get_wallet_balance()
-                    elif isinstance(client, CoinbaseExchangeClient):
-                        priv_data = client.get_accounts()
-                    elif isinstance(client, KrakenClient):
-                        priv_data = client.get_balance()
-                    elif isinstance(client, KrakenFuturesClient):
-                        priv_data = client.get_accounts()
-                    elif isinstance(client, KucoinSpotClient):
-                        priv_data = client.get_accounts()
-                    elif isinstance(client, KucoinFuturesClient):
-                        priv_data = client.get_accounts()
-                    elif isinstance(client, GateSpotClient):
-                        priv_data = client.get_accounts()
-                    elif isinstance(client, GateUsdtFuturesClient):
-                        priv_data = client.get_accounts()
-                    elif isinstance(client, BitfinexClient):
-                        priv_data = client.get_wallets()
-                    elif isinstance(client, BitfinexDerivativesClient):
-                        priv_data = client.get_wallets()
-                    elif isinstance(client, DeepcoinClient):
-                        priv_data = client.get_balance()
-                except Exception as e:
-                    msg = str(e)
-                    # Add actionable hints for the most common Binance auth error.
-                    if exchange_id == "binance" and ("-2015" in msg or "Invalid API-key, IP, or permissions" in msg):
-                        # Auto A/B test: try the other market_type once to pinpoint permission mismatch.
-                        alt_market_type = "spot" if market_type != "spot" else "swap"
-                        alt_client_kind = ""
-                        alt_base_url = ""
-                        alt_ok = False
-                        try:
-                            alt_client = create_client(resolved, market_type=alt_market_type)
-                            alt_client_kind = type(alt_client).__name__
-                            alt_base_url = getattr(alt_client, "base_url", "") or ""
-                            if isinstance(alt_client, BinanceFuturesClient) or isinstance(alt_client, BinanceSpotClient):
-                                _ = alt_client.get_account()
-                                alt_ok = True
-                        except Exception:
-                            alt_ok = False
+                        return client.get_accounts(product_type=product_type)
+                    if isinstance(client, BitgetSpotClient):
+                        return client.get_assets()
+                    if isinstance(client, BybitClient):
+                        return client.get_wallet_balance()
+                    if isinstance(client, CoinbaseExchangeClient):
+                        return client.get_accounts()
+                    if isinstance(client, KrakenClient):
+                        return client.get_balance()
+                    if isinstance(client, KrakenFuturesClient):
+                        return client.get_accounts()
+                    if isinstance(client, KucoinSpotClient):
+                        return client.get_accounts()
+                    if isinstance(client, KucoinFuturesClient):
+                        return client.get_accounts()
+                    if isinstance(client, GateSpotClient):
+                        return client.get_accounts()
+                    if isinstance(client, GateUsdtFuturesClient):
+                        return client.get_accounts()
+                    if isinstance(client, BitfinexClient):
+                        return client.get_wallets()
+                    if isinstance(client, BitfinexDerivativesClient):
+                        return client.get_wallets()
+                    if isinstance(client, DeepcoinClient):
+                        return client.get_balance()
+                    if isinstance(client, HtxClient):
+                        return client.get_balance()
+                    return None
 
-                        base_url = getattr(client, "base_url", "") or ""
-                        hint = (
-                            f"Binance auth failed (-2015). Verify: "
-                            f"(1) IP whitelist includes this server egress IP={egress_ip or 'unknown'}, "
-                            f"(2) API key permissions match market_type={market_type} "
-                            f"(spot requires Spot permissions; swap requires Futures permissions), "
-                            f"(3) you're using binance.com keys for base_url={base_url or 'unknown'}."
-                        )
-                        if alt_ok:
-                            hint += (
-                                f" Auto-check: your key works for market_type={alt_market_type} "
-                                f"(client={alt_client_kind}, base_url={alt_base_url or 'unknown'}) "
-                                f"but fails for market_type={market_type}. This is almost always a permissions/product mismatch."
+                def _probe_market_type(market_type: str):
+                    try:
+                        client = create_client(resolved, market_type=market_type)
+                    except Exception as e:
+                        return {
+                            'success': False,
+                            'message': f'Create client failed: {str(e)}',
+                            'data': {
+                                'exchange': safe_cfg,
+                                'market_type': market_type,
+                                'egress_ip': egress_ip,
+                            },
+                        }
+                    client_kind = type(client).__name__
+
+                    ok_public = False
+                    try:
+                        ok_public = bool(getattr(client, "ping")())
+                    except Exception:
+                        ok_public = False
+                    if not ok_public:
+                        return {
+                            'success': False,
+                            'message': f'Public ping failed: {exchange_id}',
+                            'data': {
+                                'exchange': safe_cfg,
+                                'client': client_kind,
+                                'market_type': market_type,
+                                'egress_ip': egress_ip,
+                                'base_url': getattr(client, "base_url", "") or "",
+                            },
+                        }
+
+                    try:
+                        priv_data = _validate_private(client, market_type)
+                    except Exception as e:
+                        msg = str(e)
+                        if exchange_id == "binance" and ("-2015" in msg or "Invalid API-key, IP, or permissions" in msg):
+                            alt_market_type = "spot" if market_type != "spot" else "swap"
+                            alt_client_kind = ""
+                            alt_base_url = ""
+                            alt_ok = False
+                            try:
+                                alt_client = create_client(resolved, market_type=alt_market_type)
+                                alt_client_kind = type(alt_client).__name__
+                                alt_base_url = getattr(alt_client, "base_url", "") or ""
+                                if isinstance(alt_client, (BinanceFuturesClient, BinanceSpotClient)):
+                                    _ = alt_client.get_account()
+                                    alt_ok = True
+                            except Exception:
+                                alt_ok = False
+
+                            base_url = getattr(client, "base_url", "") or ""
+                            is_demo = str(resolved.get("enable_demo_trading") or resolved.get("enableDemoTrading") or "").strip().lower() in ("true", "1", "yes")
+                            hint = (
+                                f"Binance auth failed (-2015). Verify: "
+                                f"(1) IP whitelist includes this server egress IP={egress_ip or 'unknown'}, "
+                                f"(2) API key permissions match market_type={market_type} "
+                                f"(spot requires Spot permissions; swap requires Futures permissions), "
+                                f"(3) you're using the correct key set for base_url={base_url or 'unknown'}."
                             )
-                        msg = f"{msg} | {hint}"
+                            if is_demo:
+                                hint += " Demo mode is enabled, so you must use Binance demo/testnet API keys instead of mainnet keys."
+                            else:
+                                hint += " Mainnet mode is enabled, so you must use binance.com mainnet keys."
+                            if alt_ok:
+                                hint += (
+                                    f" Auto-check: your key works for market_type={alt_market_type} "
+                                    f"(client={alt_client_kind}, base_url={alt_base_url or 'unknown'}) "
+                                    f"but fails for market_type={market_type}. This is almost always a permissions/product mismatch."
+                                )
+                            msg = f"{msg} | {hint}"
+                        return {
+                            'success': False,
+                            'message': f'Auth failed: {msg}',
+                            'data': {
+                                'exchange': safe_cfg,
+                                'client': client_kind,
+                                'market_type': market_type,
+                                'egress_ip': egress_ip,
+                                'base_url': getattr(client, "base_url", "") or "",
+                            },
+                        }
+
                     return {
-                        'success': False,
-                        'message': f'Auth failed: {msg}',
+                        'success': True,
+                        'message': 'Connection OK',
                         'data': {
                             'exchange': safe_cfg,
                             'client': client_kind,
                             'market_type': market_type,
                             'egress_ip': egress_ip,
                             'base_url': getattr(client, "base_url", "") or "",
+                            'private': priv_data,
                         },
                     }
 
-                return {
-                    'success': True,
-                    'message': 'Connection OK',
-                    'data': {
-                        'exchange': safe_cfg,
-                        'client': client_kind,
-                        'market_type': market_type,
-                        'egress_ip': egress_ip,
-                        'base_url': getattr(client, "base_url", "") or "",
-                        'private': priv_data,
-                    },
-                }
+                raw_market_type = str(resolved.get("market_type") or resolved.get("defaultType") or "").strip().lower()
+                if raw_market_type in ("futures", "future", "perp", "perpetual"):
+                    raw_market_type = "swap"
+                explicit_market_type = raw_market_type in ("spot", "swap")
+                if exchange_id in ("coinbaseexchange", "coinbase_exchange"):
+                    market_candidates = ["spot"]
+                else:
+                    market_candidates = [raw_market_type] if explicit_market_type else ["spot", "swap"]
+
+                last_failure = None
+                for market_type in market_candidates:
+                    result = _probe_market_type(market_type)
+                    if result.get('success'):
+                        if not explicit_market_type and len(market_candidates) > 1:
+                            result['message'] = f"Connection OK ({market_type})"
+                        return result
+                    last_failure = result
+
+                if last_failure and not explicit_market_type and len(market_candidates) > 1:
+                    tried = "/".join(market_candidates)
+                    last_failure['message'] = f"{last_failure.get('message')}. Tried market_type={tried}"
+                return last_failure or {'success': False, 'message': 'Connection failed', 'data': None}
             except Exception as e:
                 logger.error(f"test_exchange_connection failed: {str(e)}")
                 return {'success': False, 'message': f'Connection failed: {str(e)}', 'data': None}

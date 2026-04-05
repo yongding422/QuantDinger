@@ -873,15 +873,47 @@ def get_system_strategies():
         page: int (default 1)
         page_size: int (default 20, max 100)
         status: str (optional, filter by status: running/stopped/all)
+        execution_mode: str (optional, live/signal — omit or all for any)
         search: str (optional, search by strategy name/symbol/username)
+        sort_by: str (optional, whitelist; default status+updated_at)
+        sort_order: str (optional, asc or desc; default desc when sort_by set)
     """
     try:
         page = request.args.get('page', 1, type=int)
         page_size = request.args.get('page_size', 20, type=int)
         status_filter = request.args.get('status', '', type=str).strip().lower()
+        execution_filter = request.args.get('execution_mode', '', type=str).strip().lower()
         search = request.args.get('search', '', type=str).strip()
+        sort_by = request.args.get('sort_by', '', type=str).strip().lower()
+        sort_order = request.args.get('sort_order', 'desc', type=str).strip().lower()
+        if sort_order not in ('asc', 'desc'):
+            sort_order = 'desc'
         page_size = min(100, max(1, page_size))
         offset = (page - 1) * page_size
+
+        sort_sql_map = {
+            'id': 's.id',
+            'updated_at': 's.updated_at',
+            'created_at': 's.created_at',
+            'initial_capital': 's.initial_capital',
+            'strategy_name': 's.strategy_name',
+            'symbol': 's.symbol',
+            'status': 's.status',
+            'execution_mode': 's.execution_mode',
+            'leverage': 's.leverage',
+        }
+        sort_expr_map = {
+            'total_pnl': (
+                "(COALESCE((SELECT SUM(unrealized_pnl) FROM qd_strategy_positions p WHERE p.strategy_id = s.id), 0)"
+                " + COALESCE((SELECT SUM(profit) FROM qd_strategy_trades t WHERE t.strategy_id = s.id), 0))"
+            ),
+            'trade_count': '(SELECT COUNT(*) FROM qd_strategy_trades t WHERE t.strategy_id = s.id)',
+            'position_count': '(SELECT COUNT(*) FROM qd_strategy_positions p WHERE p.strategy_id = s.id)',
+            'total_equity': (
+                'COALESCE((SELECT SUM(equity) FROM qd_strategy_positions p WHERE p.strategy_id = s.id), 0)'
+            ),
+        }
+        direction = 'ASC' if sort_order == 'asc' else 'DESC'
 
         with get_db_connection() as db:
             cur = db.cursor()
@@ -894,6 +926,10 @@ def get_system_strategies():
                 conditions.append("s.status = ?")
                 params.append(status_filter)
 
+            if execution_filter in ('live', 'signal'):
+                conditions.append("s.execution_mode = ?")
+                params.append(execution_filter)
+
             if search:
                 conditions.append(
                     "(s.strategy_name ILIKE ? OR s.symbol ILIKE ? OR u.username ILIKE ? OR u.nickname ILIKE ?)"
@@ -904,6 +940,13 @@ def get_system_strategies():
             where_clause = ""
             if conditions:
                 where_clause = "WHERE " + " AND ".join(conditions)
+
+            if sort_by in sort_sql_map:
+                order_clause = f"ORDER BY {sort_sql_map[sort_by]} {direction}, s.id DESC"
+            elif sort_by in sort_expr_map:
+                order_clause = f"ORDER BY {sort_expr_map[sort_by]} {direction}, s.id DESC"
+            else:
+                order_clause = "ORDER BY s.status DESC, s.updated_at DESC, s.id DESC"
 
             # Get total count
             count_sql = f"""
@@ -941,7 +984,7 @@ def get_system_strategies():
                 FROM qd_strategies_trading s
                 LEFT JOIN qd_users u ON u.id = s.user_id
                 {where_clause}
-                ORDER BY s.status DESC, s.updated_at DESC
+                {order_clause}
                 LIMIT ? OFFSET ?
             """
             cur.execute(query_sql, tuple(params) + (page_size, offset))

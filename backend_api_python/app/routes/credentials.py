@@ -40,7 +40,7 @@ def list_credentials():
             cur = db.cursor()
             cur.execute(
                 """
-                SELECT id, user_id, name, exchange_id, api_key_hint, created_at, updated_at
+                SELECT id, user_id, name, exchange_id, api_key_hint, encrypted_config, created_at, updated_at
                 FROM qd_exchange_credentials
                 WHERE user_id = %s
                 ORDER BY id DESC
@@ -50,7 +50,20 @@ def list_credentials():
             rows = cur.fetchall() or []
             cur.close()
 
-        return jsonify({'code': 1, 'msg': 'success', 'data': {'items': rows}})
+        items = []
+        for row in rows:
+            item = dict(row or {})
+            item['enable_demo_trading'] = False
+            try:
+                plain = decrypt_credential_blob(item.get('encrypted_config'))
+                cfg = json.loads(plain) if plain else {}
+                item['enable_demo_trading'] = bool(cfg.get('enable_demo_trading') or cfg.get('enableDemoTrading'))
+            except Exception:
+                item['enable_demo_trading'] = False
+            item.pop('encrypted_config', None)
+            items.append(item)
+
+        return jsonify({'code': 1, 'msg': 'success', 'data': {'items': items}})
     except Exception as e:
         logger.error(f"list_credentials failed: {str(e)}")
         logger.error(traceback.format_exc())
@@ -59,7 +72,7 @@ def list_credentials():
 
 CRYPTO_EXCHANGES = [
     'binance', 'okx', 'bitget', 'bybit', 'coinbaseexchange',
-    'kraken', 'kucoin', 'gate', 'bitfinex', 'deepcoin'
+    'kraken', 'kucoin', 'gate', 'bitfinex', 'deepcoin', 'htx'
 ]
 
 

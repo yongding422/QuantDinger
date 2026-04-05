@@ -4,6 +4,95 @@ This document records version updates, new features, bug fixes, and database mig
 
 ---
 
+## V3.0.1 (2026-04-05) — Frontend / docs
+
+- **前端版本**：`QuantDinger-Vue-src/package.json`、页脚展示与 `frontend/VERSION` 统一为 **3.0.1**。
+- **文档**：根目录 `README.md` 与 `docs/README_CN.md` 补充 QuantDinger 专属交易所邀请注册链接表（与个人中心「开户」一致），版本徽章更新为 3.0.1。
+- **回测中心**：暗黑主题下图标与「添加标的」等弹窗样式对齐（`a-icon`、图表标题区、Modal 挂载层）。
+
+---
+
+## V2.2.4 (2026-04-05)
+
+### 🚀 New Features
+
+- **真实策略回测主链路**: 新增基于 `strategyId` 的策略回测入口，支持已保存的 `IndicatorStrategy` 与 `ScriptStrategy`，不再只是“取指标再跑一次指标回测”。
+- **策略快照解析层**: 后端新增统一策略快照解析逻辑，把 `indicator_config`、`trading_config`、`strategy_code` 解析为可回测的标准输入。
+- **策略回测历史与详情**: 回测记录现在可区分 `indicator` / `strategy_indicator` / `strategy_script`，并支持策略回测历史、详情查看和 AI 修正建议链路。
+- **交易助手联动回测中心**: 交易助手中的策略项新增回测跳转入口，可直接带 `strategy_id` 进入回测中心。
+
+### 🐛 Bug Fixes
+
+- Fixed the previous “策略回测” pseudo-flow that only reused `/api/indicator/backtest` and could not faithfully replay stored strategies.
+- Fixed strategy backtest history semantics so records can be linked to concrete strategies instead of only relying on `indicator_id`.
+- Fixed strategy backtest UI entry restoration in Backtest Center and wired the strategy selector/history drawer to real backend endpoints.
+
+### 🎨 UI/UX Improvements
+
+- Restored the `回测中心 -> 策略回测` tab with strategy summary cards and environment override controls.
+- Unified strategy backtest history display with the existing run viewer and AI suggestion modal.
+
+### 📋 Database Migration
+
+**在已有 PostgreSQL 库上执行（新库若已通过更新后的 `migrations/init.sql` 初始化则无需再执行）：**
+
+```sql
+-- ============================================================
+-- QuantDinger V2.2.4 Database Migration
+-- Strategy Backtest Persistence Upgrade
+-- ============================================================
+
+ALTER TABLE qd_backtest_runs ADD COLUMN IF NOT EXISTS strategy_id INTEGER;
+ALTER TABLE qd_backtest_runs ADD COLUMN IF NOT EXISTS strategy_name VARCHAR(255) DEFAULT '';
+ALTER TABLE qd_backtest_runs ADD COLUMN IF NOT EXISTS run_type VARCHAR(50) DEFAULT 'indicator';
+ALTER TABLE qd_backtest_runs ADD COLUMN IF NOT EXISTS config_snapshot TEXT DEFAULT '';
+ALTER TABLE qd_backtest_runs ADD COLUMN IF NOT EXISTS engine_version VARCHAR(50) DEFAULT '';
+ALTER TABLE qd_backtest_runs ADD COLUMN IF NOT EXISTS code_hash VARCHAR(128) DEFAULT '';
+
+CREATE INDEX IF NOT EXISTS idx_backtest_runs_strategy_id ON qd_backtest_runs(strategy_id);
+CREATE INDEX IF NOT EXISTS idx_backtest_runs_run_type ON qd_backtest_runs(run_type);
+
+CREATE TABLE IF NOT EXISTS qd_backtest_trades (
+    id SERIAL PRIMARY KEY,
+    run_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL DEFAULT 1 REFERENCES qd_users(id) ON DELETE CASCADE,
+    strategy_id INTEGER,
+    trade_index INTEGER DEFAULT 0,
+    trade_time VARCHAR(64) DEFAULT '',
+    trade_type VARCHAR(64) DEFAULT '',
+    side VARCHAR(32) DEFAULT '',
+    price DOUBLE PRECISION DEFAULT 0,
+    amount DOUBLE PRECISION DEFAULT 0,
+    profit DOUBLE PRECISION DEFAULT 0,
+    balance DOUBLE PRECISION DEFAULT 0,
+    reason VARCHAR(64) DEFAULT '',
+    payload_json TEXT DEFAULT '',
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_backtest_trades_run_id ON qd_backtest_trades(run_id);
+
+CREATE TABLE IF NOT EXISTS qd_backtest_equity_points (
+    id SERIAL PRIMARY KEY,
+    run_id INTEGER NOT NULL,
+    point_index INTEGER DEFAULT 0,
+    point_time VARCHAR(64) DEFAULT '',
+    point_value DOUBLE PRECISION DEFAULT 0,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_backtest_equity_points_run_id ON qd_backtest_equity_points(run_id);
+```
+
+### 📝 Migration Notes
+
+- All statements are idempotent and safe to run multiple times.
+- Existing backtest data is preserved.
+- Existing `indicator` backtest records remain compatible; new strategy backtests will write `run_type`, `strategy_id`, `strategy_name`, `config_snapshot`, `engine_version`, and `code_hash`.
+- `qd_backtest_trades` and `qd_backtest_equity_points` are introduced for future strategy-level analytics and debugging.
+
+---
+
 ## V2.2.3 (2026-03-24)
 
 ### 🚀 New Features

@@ -40,12 +40,14 @@ class BitgetMixClient(BaseRestClient):
         base_url: str = "https://api.bitget.com",
         timeout_sec: float = 15.0,
         channel_api_code: str = "qvz9x",
+        simulated_trading: bool = False,
     ):
         super().__init__(base_url=base_url, timeout_sec=timeout_sec)
         self.api_key = (api_key or "").strip()
         self.secret_key = (secret_key or "").strip()
         self.passphrase = (passphrase or "").strip()
         self.channel_api_code = (channel_api_code or "").strip()
+        self.simulated_trading = bool(simulated_trading)
         if not self.api_key or not self.secret_key or not self.passphrase:
             raise LiveTradingError("Missing Bitget api_key/secret_key/passphrase")
 
@@ -193,6 +195,8 @@ class BitgetMixClient(BaseRestClient):
             "ACCESS-PASSPHRASE": self.passphrase,
             "Content-Type": "application/json",
         }
+        if self.simulated_trading:
+            headers["PAPTRADING"] = "1"
         clean_path = str(request_path or "").split("?", 1)[0]
         if self.channel_api_code and clean_path in self._CHANNEL_API_CODE_ORDER_PATHS:
             headers["X-CHANNEL-API-CODE"] = self.channel_api_code

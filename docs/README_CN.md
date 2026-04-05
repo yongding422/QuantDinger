@@ -27,7 +27,7 @@
 
   <p>
     <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg?style=flat-square&logo=apache" alt="License"></a>
-    <img src="https://img.shields.io/badge/Version-2.2.3-orange?style=flat-square" alt="Version">
+    <img src="https://img.shields.io/badge/Version-3.0.1-orange?style=flat-square" alt="Version">
     <img src="https://img.shields.io/badge/Python-3.10+-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python">
     <img src="https://img.shields.io/badge/Docker-一键部署-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker">
     <img src="https://img.shields.io/badge/Vibe%20Coding-就绪-FF6B6B?style=flat-square&logo=sparkles&logoColor=white" alt="Vibe Coding">
@@ -51,6 +51,7 @@
 - [🎯 为什么选择QuantDinger？](#-为什么选择quantdinger)
 - [📸 视觉导览](#-视觉导览--观看视频演示)
 - [✨ 核心功能](#-核心功能)
+- [🔗 QuantDinger 交易所注册邀请链接](#quantdinger-交易所注册邀请链接)
 - [🔌 支持的交易所和经纪商](#-支持的交易所和经纪商)
 - [🏗️ 架构与配置](#️-架构与配置)
 - [📚 文档索引](#-文档索引)
@@ -386,6 +387,23 @@ flowchart TB
 
 ---
 
+## 🔗 QuantDinger 交易所注册邀请链接
+
+以下为 **QuantDinger** 合作邀请注册链接。通过链接开户可能享受交易手续费返佣（例如最高约 **20%** 返佣，具体以各交易所规则与活动为准）。
+
+| 交易所 | 邀请 / 注册链接 |
+|--------|-----------------|
+| Binance | [注册开户](https://www.bsmkweb.cc/register?ref=QUANTDINGER) |
+| Bitget | [注册开户](https://partner.hdmune.cn/bg/7r4xz8kd) |
+| Bybit | [注册开户](https://partner.bybit.com/b/DINGER) |
+| OKX | [注册开户](https://www.xqmnobxky.com/join/QUANTDINGER) |
+| Gate.io | [注册开户](https://www.gateport.company/share/DINGER) |
+| HTX | [注册开户](https://www.htx.com/invite/zh-cn/1f?invite_code=dinger) |
+
+网页端登录后，亦可在 **个人中心 → 选择交易所开户** 使用相同链接。
+
+---
+
 ## 🔌 支持的交易所和经纪商
 
 ### 加密货币（直接API交易）
@@ -412,11 +430,7 @@ flowchart TB
 
 ### 交易所返佣入口
 
-如果你本来就准备开通交易所账户，建议直接走返佣链接。很多交易用户本来就会主动找“手续费减免/返佣链接”，而下面这些链接都可以直接享受 20% 手续费减免，不增加任何额外成本。
-
-- **OKX**：[开户即享 20% 手续费减免](https://www.promooboost.com/join/QUANTDINGER)
-- **Bitget**：[开户即享 20% 手续费减免](https://partner.bitget.com/bg/dinger)
-- **Bitget（备用链接）**：[备用 20% 手续费减免注册链接](https://partner.hdmune.cn/bg/7r4xz8kd)
+完整列表见上文：[QuantDinger 交易所注册邀请链接](#quantdinger-交易所注册邀请链接)。
 
 ---
 

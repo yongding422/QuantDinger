@@ -33,12 +33,15 @@ class BybitClient(BaseRestClient):
         timeout_sec: float = 15.0,
         category: str = "linear",  # "linear" (USDT perpetual) or "spot"
         recv_window_ms: int = 5000,
+        broker_referer: str = "",
+        hedge_mode: bool = False,
     ):
         super().__init__(base_url=base_url, timeout_sec=timeout_sec)
         self.api_key = (api_key or "").strip()
         self.secret_key = (secret_key or "").strip()
         self.category = (category or "linear").strip().lower()
-        self.broker_referer = self._DEFAULT_BROKER_REFERER
+        self.broker_referer = (broker_referer or self._DEFAULT_BROKER_REFERER).strip()
+        self.hedge_mode = bool(hedge_mode)
         if self.category not in ("linear", "spot"):
             self.category = "linear"
         try:
@@ -158,8 +161,9 @@ class BybitClient(BaseRestClient):
     def _sign(self, prehash: str) -> str:
         return hmac.new(self.secret_key.encode("utf-8"), prehash.encode("utf-8"), hashlib.sha256).hexdigest()
 
-    @staticmethod
-    def _resolve_position_idx(pos_side: str) -> Optional[int]:
+    def _resolve_position_idx(self, pos_side: str) -> Optional[int]:
+        if not self.hedge_mode:
+            return None
         ps = str(pos_side or "").strip().lower()
         if ps == "long":
             return 1
