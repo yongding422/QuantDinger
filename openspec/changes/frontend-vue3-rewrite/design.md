@@ -318,9 +318,8 @@ EXPOSE 80
 ```
 
 ### 11.3 Deployment Options
-- **Option A (replace):** Copy `dist/` to `frontend/dist/` → nginx serves as-is
-- **Option B (new port):** Build to `frontend_vue3/dist/` → nginx serves at `:8889`
-- Default: Option B until parity confirmed
+- **Chosen: Option B (new port)** — Deploy to `:8889`. Existing system at `:8888` stays running for comparison after each stage.
+- **Future:** Option A (replace) after full parity confirmed in Epic 7
 
 ---
 

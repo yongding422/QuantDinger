@@ -435,10 +435,10 @@ frontend_vue3/
 
 ---
 
-## 11. Open Questions / Decisions Needed
+## 11. Decisions Made
 
-1. **Deploy strategy**: Swap existing `frontend/dist` or deploy on separate port (e.g., 8889)?
-2. **CI/CD**: GitHub Actions for build + test on PR?
-3. **Design deviations**: Allow UI/UX improvements during rewrite, or strictly match existing look-and-feel?
-4. **API versioning**: Backend is v3.0.1 — should frontend pin to a version, or always use latest?
-5. **Auth persistence**: JWT in localStorage (current) vs. httpOnly cookie (more secure)?
+1. **Frontend location**: Single repo at `frontend_vue3/` folder
+2. **Deploy strategy**: New port (e.g., `:8889`) — existing system stays running for comparison
+3. **Design deviations**: Allow reasonable UI/UX improvements during rewrite
+4. **Auth storage**: JWT in `localStorage` for now (httpOnly cookie is a future improvement)
+5. **CI/CD**: GitHub Actions for build + test on PR (TODO: implement in Epic 8)
