@@ -47,7 +47,24 @@ def _get_client():
 
 @mt5_bp.route("/status", methods=["GET"])
 def get_status():
-    """Get MT5 connection status."""
+    """
+    Get MT5 connection status.
+    ---
+    tags:
+      - mt5
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            connected:
+              type: boolean
+              example: true
+            error:
+              type: string
+              example: ""
+    """
     try:
         _ensure_mt5_imports()
         client = _get_client()
@@ -68,14 +85,61 @@ def get_status():
 def connect():
     """
     Connect to MT5 terminal.
-    
-    Request body:
-    {
-        "login": 12345678,      // MT5 account number
-        "password": "xxx",      // MT5 password
-        "server": "ICMarkets-Demo",  // Broker server
-        "terminal_path": ""     // Optional: path to terminal64.exe
-    }
+    ---
+    tags:
+      - mt5
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - login
+            - password
+            - server
+          properties:
+            login:
+              type: integer
+              description: MT5 account number
+              example: 12345678
+            password:
+              type: string
+              description: MT5 password
+              example: "xxx"
+            server:
+              type: string
+              description: Broker server
+              example: ICMarkets-Demo
+            terminal_path:
+              type: string
+              description: Path to terminal64.exe
+              example: ""
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: true
+            message:
+              type: string
+              example: Connected to MT5
+            account:
+              type: object
+      400:
+        description: Connection failed
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: false
+            error:
+              type: string
+              example: Failed to connect to MT5
     """
     global _client
     
@@ -133,7 +197,24 @@ def connect():
 
 @mt5_bp.route("/disconnect", methods=["POST"])
 def disconnect():
-    """Disconnect from MT5 terminal."""
+    """
+    Disconnect from MT5 terminal.
+    ---
+    tags:
+      - mt5
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: true
+            message:
+              type: string
+              example: Disconnected
+    """
     global _client
     
     try:
@@ -150,7 +231,28 @@ def disconnect():
 
 @mt5_bp.route("/account", methods=["GET"])
 def get_account():
-    """Get account information."""
+    """
+    Get account information.
+    ---
+    tags:
+      - mt5
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+      400:
+        description: Not connected
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: false
+            error:
+              type: string
+              example: Not connected to MT5
+    """
     try:
         client = _get_client()
         if not client.connected:
@@ -165,7 +267,43 @@ def get_account():
 
 @mt5_bp.route("/positions", methods=["GET"])
 def get_positions():
-    """Get open positions."""
+    """
+    Get open positions.
+    ---
+    tags:
+      - mt5
+    parameters:
+      - in: query
+        name: symbol
+        type: string
+        required: false
+        description: Filter by symbol
+        example: EURUSD
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: true
+            positions:
+              type: array
+              items:
+                type: object
+      400:
+        description: Not connected
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: false
+            error:
+              type: string
+              example: Not connected to MT5
+    """
     try:
         client = _get_client()
         if not client.connected:
@@ -181,7 +319,43 @@ def get_positions():
 
 @mt5_bp.route("/orders", methods=["GET"])
 def get_orders():
-    """Get pending orders."""
+    """
+    Get pending orders.
+    ---
+    tags:
+      - mt5
+    parameters:
+      - in: query
+        name: symbol
+        type: string
+        required: false
+        description: Filter by symbol
+        example: EURUSD
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: true
+            orders:
+              type: array
+              items:
+                type: object
+      400:
+        description: Not connected
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: false
+            error:
+              type: string
+              example: Not connected to MT5
+    """
     try:
         client = _get_client()
         if not client.connected:
@@ -197,7 +371,32 @@ def get_orders():
 
 @mt5_bp.route("/symbols", methods=["GET"])
 def get_symbols():
-    """Get available symbols."""
+    """
+    Get available symbols.
+    ---
+    tags:
+      - mt5
+    parameters:
+      - in: query
+        name: group
+        type: string
+        required: false
+        description: Symbol group filter
+        example: "*"
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: true
+            symbols:
+              type: array
+              items:
+                type: string
+    """
     try:
         client = _get_client()
         if not client.connected:
@@ -217,15 +416,84 @@ def get_symbols():
 def place_order():
     """
     Place an order.
-    
-    Request body:
-    {
-        "symbol": "EURUSD",
-        "side": "buy",          // "buy" or "sell"
-        "volume": 0.1,          // Lot size
-        "orderType": "market",  // "market" or "limit"
-        "price": 1.0800         // Required for limit orders
-    }
+    ---
+    tags:
+      - mt5
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - symbol
+            - side
+            - volume
+          properties:
+            symbol:
+              type: string
+              description: Trading symbol
+              example: EURUSD
+            side:
+              type: string
+              enum: [buy, sell]
+              description: Order side
+              example: buy
+            volume:
+              type: number
+              description: Lot size
+              example: 0.1
+            orderType:
+              type: string
+              enum: [market, limit]
+              description: Order type
+              example: market
+            price:
+              type: number
+              description: Limit price (required for limit orders)
+              example: 1.0800
+            comment:
+              type: string
+              description: Order comment
+              example: QuantDinger
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: true
+            order_id:
+              type: integer
+              example: 123
+            deal_id:
+              type: integer
+              example: 0
+            filled:
+              type: boolean
+              example: false
+            price:
+              type: number
+              example: 0
+            status:
+              type: string
+              example: pending
+            message:
+              type: string
+              example: Order placed
+      400:
+        description: Validation error or not connected
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: false
+            error:
+              type: string
+              example: Missing required fields
     """
     try:
         client = _get_client()
@@ -293,12 +561,61 @@ def place_order():
 def close_position():
     """
     Close a position.
-    
-    Request body:
-    {
-        "ticket": 123456789,    // Position ticket
-        "volume": 0.1           // Optional: partial close volume
-    }
+    ---
+    tags:
+      - mt5
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - ticket
+          properties:
+            ticket:
+              type: integer
+              description: Position ticket
+              example: 123456789
+            volume:
+              type: number
+              description: Partial close volume (optional)
+              example: 0.1
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: true
+            order_id:
+              type: integer
+              example: 123
+            deal_id:
+              type: integer
+              example: 456
+            filled:
+              type: boolean
+              example: true
+            price:
+              type: number
+              example: 1.0800
+            message:
+              type: string
+              example: Position closed
+      400:
+        description: Validation error or not connected
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: false
+            error:
+              type: string
+              example: Missing required field: ticket
     """
     try:
         client = _get_client()
@@ -343,7 +660,42 @@ def close_position():
 
 @mt5_bp.route("/order/<int:ticket>", methods=["DELETE"])
 def cancel_order(ticket: int):
-    """Cancel a pending order."""
+    """
+    Cancel a pending order.
+    ---
+    tags:
+      - mt5
+    parameters:
+      - in: path
+        name: ticket
+        type: integer
+        required: true
+        description: Order ticket
+        example: 123456789
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: true
+            message:
+              type: string
+              example: Order 123456789 cancelled
+      400:
+        description: Failed to cancel
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: false
+            error:
+              type: string
+              example: Failed to cancel order
+    """
     try:
         client = _get_client()
         if not client.connected:
@@ -365,9 +717,32 @@ def cancel_order(ticket: int):
 def get_quote():
     """
     Get real-time quote.
-    
-    Query params:
-    - symbol: Trading symbol (e.g., EURUSD)
+    ---
+    tags:
+      - mt5
+    parameters:
+      - in: query
+        name: symbol
+        type: string
+        required: true
+        description: Trading symbol
+        example: EURUSD
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+      400:
+        description: Missing symbol
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: false
+            error:
+              type: string
+              example: Missing symbol parameter
     """
     try:
         client = _get_client()

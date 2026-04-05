@@ -240,23 +240,99 @@ def _record_quick_trade(
 @quick_trade_bp.route('/place-order', methods=['POST'])
 @login_required
 def place_order():
-    """
-    Place a quick market or limit order.
+    """Place a quick market or limit order.
 
-    Body JSON:
-      credential_id  (int)    — saved exchange credential ID
-      symbol         (str)    — e.g. "BTC/USDT"
-      side           (str)    — "buy" or "sell"
-      order_type     (str)    — "market" or "limit"  (default: market)
-      amount         (float)  — USDT amount (always in USDT, will be converted to base qty)
-      price          (float)  — limit price (required for limit orders)
-      leverage       (int)    — leverage multiplier (default: 1)
-                                - leverage = 1: spot market
-                                - leverage > 1: swap (perpetual futures) market
-      market_type    (str)    — "swap" / "spot" (optional, auto-determined by leverage if not provided)
-      tp_price       (float)  — take-profit price (optional, for record only)
-      sl_price       (float)  — stop-loss price (optional, for record only)
-      source         (str)    — "ai_radar" / "ai_analysis" / "indicator" / "manual"
+    ---
+    tags:
+      - quick-trade
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - credential_id
+            - symbol
+            - side
+            - amount
+          properties:
+            credential_id:
+              type: integer
+              description: Saved exchange credential ID
+              example: 1
+            symbol:
+              type: string
+              description: Trading pair (e.g., BTC/USDT)
+              example: BTC/USDT
+            side:
+              type: string
+              description: Order side: buy or sell
+              example: buy
+            order_type:
+              type: string
+              description: Order type: market or limit (default: market)
+              example: market
+            amount:
+              type: number
+              description: USDT amount (always in USDT, will be converted to base qty)
+              example: 100
+            price:
+              type: number
+              description: Limit price (required for limit orders)
+              example: 50000
+            leverage:
+              type: integer
+              description: Leverage multiplier (default: 1)
+              example: 1
+            market_type:
+              type: string
+              description: Market type: swap or spot (optional, auto-determined)
+              example: spot
+            tp_price:
+              type: number
+              description: Take-profit price (optional)
+              example: 55000
+            sl_price:
+              type: number
+              description: Stop-loss price (optional)
+              example: 48000
+            source:
+              type: string
+              description: Source: ai_radar, ai_analysis, indicator, or manual
+              example: manual
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: Order placed successfully
+            data:
+              type: object
+              properties:
+                trade_id:
+                  type: integer
+                  example: 123
+                exchange_order_id:
+                  type: string
+                  example: "89723456"
+                filled:
+                  type: number
+                  example: 0.002
+                avg_price:
+                  type: number
+                  example: 50000
+                status:
+                  type: string
+                  example: filled
+    security:
+      - Bearer: []
     """
     try:
         user_id = g.user_id
@@ -516,10 +592,48 @@ def _limit_order_kwargs(client, symbol, amount, price, side, market_type, client
 @quick_trade_bp.route('/balance', methods=['GET'])
 @login_required
 def get_balance():
-    """
-    Get available balance from exchange.
+    """Get available balance from exchange.
 
-    Query: credential_id (int), market_type (str, default "swap")
+    ---
+    tags:
+      - quick-trade
+    parameters:
+      - in: query
+        name: credential_id
+        type: integer
+        required: true
+        description: Saved exchange credential ID
+      - in: query
+        name: market_type
+        type: string
+        default: swap
+        description: Market type: swap or spot
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                available:
+                  type: number
+                  example: 10000
+                total:
+                  type: number
+                  example: 12500
+                currency:
+                  type: string
+                  example: USDT
+    security:
+      - Bearer: []
     """
     try:
         user_id = g.user_id
@@ -639,10 +753,70 @@ def _parse_balance(raw: Any, exchange_id: str, market_type: str) -> Dict[str, An
 @quick_trade_bp.route('/position', methods=['GET'])
 @login_required
 def get_position():
-    """
-    Get current position for a symbol from exchange.
+    """Get current position for a symbol from exchange.
 
-    Query: credential_id (int), symbol (str), market_type (str)
+    ---
+    tags:
+      - quick-trade
+    parameters:
+      - in: query
+        name: credential_id
+        type: integer
+        required: true
+        description: Saved exchange credential ID
+      - in: query
+        name: symbol
+        type: string
+        required: true
+        description: Trading symbol (e.g., BTC/USDT)
+      - in: query
+        name: market_type
+        type: string
+        default: swap
+        description: Market type: swap or spot
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                positions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      symbol:
+                        type: string
+                        example: BTCUSDT
+                      side:
+                        type: string
+                        example: long
+                      size:
+                        type: number
+                        example: 0.002
+                      entry_price:
+                        type: number
+                        example: 50000
+                      unrealized_pnl:
+                        type: number
+                        example: 50
+                      leverage:
+                        type: number
+                        example: 1
+                      mark_price:
+                        type: number
+                        example: 50100
+    security:
+      - Bearer: []
     """
     try:
         user_id = g.user_id
@@ -749,15 +923,79 @@ def _parse_positions(raw: Any) -> list:
 @quick_trade_bp.route('/close-position', methods=['POST'])
 @login_required
 def close_position():
-    """
-    Close an existing position.
-    
-    Body JSON:
-      credential_id  (int)    — saved exchange credential ID
-      symbol         (str)    — e.g. "BTC/USDT"
-      market_type    (str)    — "swap" / "spot" (default: swap)
-      size            (float)  — position size to close (optional, defaults to full position)
-      source          (str)    — "ai_radar" / "ai_analysis" / "indicator" / "manual"
+    """Close an existing position.
+
+    ---
+    tags:
+      - quick-trade
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - credential_id
+            - symbol
+          properties:
+            credential_id:
+              type: integer
+              description: Saved exchange credential ID
+              example: 1
+            symbol:
+              type: string
+              description: Trading symbol (e.g., BTC/USDT)
+              example: BTC/USDT
+            market_type:
+              type: string
+              description: Market type: swap or spot (default: swap)
+              example: swap
+            size:
+              type: number
+              description: Position size to close (optional, defaults to full)
+              example: 0.002
+            source:
+              type: string
+              description: Source: ai_radar, ai_analysis, indicator, or manual
+              example: manual
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: Position closed successfully
+            data:
+              type: object
+              properties:
+                trade_id:
+                  type: integer
+                  example: 123
+                exchange_order_id:
+                  type: string
+                  example: "89723456"
+                filled:
+                  type: number
+                  example: 0.002
+                avg_price:
+                  type: number
+                  example: 50000
+                closed_size:
+                  type: number
+                  example: 0.002
+                position_side:
+                  type: string
+                  example: long
+                status:
+                  type: string
+                  example: filled
+    security:
+      - Bearer: []
     """
     try:
         user_id = g.user_id
@@ -932,10 +1170,98 @@ def close_position():
 @quick_trade_bp.route('/history', methods=['GET'])
 @login_required
 def get_history():
-    """
-    Get quick trade history for the current user.
+    """Get quick trade history for the current user.
 
-    Query: limit (int, default 50), offset (int, default 0)
+    ---
+    tags:
+      - quick-trade
+    parameters:
+      - in: query
+        name: limit
+        type: integer
+        default: 50
+        description: Maximum number of results (max: 200)
+      - in: query
+        name: offset
+        type: integer
+        default: 0
+        description: Offset for pagination
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                trades:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      id:
+                        type: integer
+                        example: 1
+                      exchange_id:
+                        type: string
+                        example: binance
+                      symbol:
+                        type: string
+                        example: BTCUSDT
+                      side:
+                        type: string
+                        example: buy
+                      order_type:
+                        type: string
+                        example: market
+                      amount:
+                        type: number
+                        example: 100
+                      price:
+                        type: number
+                        example: 50000
+                      leverage:
+                        type: integer
+                        example: 1
+                      market_type:
+                        type: string
+                        example: spot
+                      tp_price:
+                        type: number
+                        example: 0
+                      sl_price:
+                        type: number
+                        example: 0
+                      status:
+                        type: string
+                        example: filled
+                      exchange_order_id:
+                        type: string
+                        example: "89723456"
+                      filled_amount:
+                        type: number
+                        example: 0.002
+                      avg_fill_price:
+                        type: number
+                        example: 50000
+                      error_msg:
+                        type: string
+                        example: ""
+                      source:
+                        type: string
+                        example: manual
+                      created_at:
+                        type: string
+                        format: date-time
+    security:
+      - Bearer: []
     """
     try:
         user_id = g.user_id

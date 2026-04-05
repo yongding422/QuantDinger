@@ -44,7 +44,7 @@ def start_polymarket_worker():
 
 def start_portfolio_monitor():
     """Start the portfolio monitor service if enabled.
-    
+
     To enable it, set ENABLE_PORTFOLIO_MONITOR=true.
     """
     import os
@@ -52,13 +52,13 @@ def start_portfolio_monitor():
     if not enabled:
         logger.info("Portfolio monitor is disabled. Set ENABLE_PORTFOLIO_MONITOR=true to enable.")
         return
-    
+
     # Avoid running twice with Flask reloader
     debug = os.getenv("PYTHON_API_DEBUG", "false").lower() == "true"
     if debug:
         if os.environ.get("WERKZEUG_RUN_MAIN") != "true":
             return
-    
+
     try:
         from app.services.portfolio_monitor import start_monitor_service
         start_monitor_service()
@@ -120,23 +120,23 @@ def restore_running_strategies():
         return
     try:
         from app.services.strategy import StrategyService
-        
+
         strategy_service = StrategyService()
         trading_executor = get_trading_executor()
-        
+
         running_strategies = strategy_service.get_running_strategies_with_type()
-        
+
         if not running_strategies:
             logger.info("No running strategies to restore.")
             return
-        
+
         logger.info(f"Restoring {len(running_strategies)} running strategies...")
-        
+
         restored_count = 0
         for strategy_info in running_strategies:
             strategy_id = strategy_info['id']
             strategy_type = strategy_info.get('strategy_type', '')
-            
+
             try:
                 if strategy_type and strategy_type != 'IndicatorStrategy':
                     logger.info(f"Skip restore unsupported strategy type: id={strategy_id}, type={strategy_type}")
@@ -144,7 +144,7 @@ def restore_running_strategies():
 
                 success = trading_executor.start_strategy(strategy_id)
                 strategy_type_name = 'IndicatorStrategy'
-                
+
                 if success:
                     restored_count += 1
                     logger.info(f"[OK] {strategy_type_name} {strategy_id} restored")
@@ -159,9 +159,9 @@ def restore_running_strategies():
             except Exception as e:
                 logger.error(f"Error restoring strategy {strategy_id}: {str(e)}")
                 logger.error(traceback.format_exc())
-        
+
         logger.info(f"Strategy restore completed: {restored_count}/{len(running_strategies)} restored")
-        
+
     except Exception as e:
         logger.error(f"Failed to restore running strategies: {str(e)}")
         logger.error(traceback.format_exc())
@@ -171,27 +171,27 @@ def restore_running_strategies():
 def create_app(config_name='default'):
     """
     Flask application factory.
-    
+
     Args:
         config_name: config name
-        
+
     Returns:
         Flask app
     """
     app = Flask(__name__)
-    
-    app.config['JSON_AS_ASCII'] = False
-    
+
+    app.config['JSON_AS_cii'] = False
+
     CORS(app)
-    
+
     setup_logger()
-    
+
     # Initialize database and ensure admin user exists
     try:
         from app.utils.db import init_database, get_db_type
         logger.info(f"Database type: {get_db_type()}")
         init_database()
-        
+
         # Ensure admin user exists (multi-user mode)
         from app.services.user_service import get_user_service
         get_user_service().ensure_admin_exists()
@@ -200,7 +200,7 @@ def create_app(config_name='default'):
 
     from app.routes import register_routes
     register_routes(app)
-    
+
     # Startup hooks.
     with app.app_context():
         start_pending_order_worker()
@@ -220,6 +220,78 @@ def create_app(config_name='default'):
         except Exception:
             pass
         restore_running_strategies()
-    
-    return app
 
+    # -------------------------------------------------------------------------
+    # Swagger / OpenAPI documentation (Flasgger)
+    # -------------------------------------------------------------------------
+    swagger_config = {
+        "headers": [],
+        "specs": [
+            {
+                "endpoint": "apispec",
+                "route": "/apispec.json",
+                "rule_filter": lambda rule: True,
+                "model_filter": lambda tag: True,
+            }
+        ],
+        "static_url_path": "/flasgger_static",
+        "swagger_ui": True,
+        "specs_route": "/apidocs/"
+    }
+
+    swagger_template = {
+        "swagger": "2.0",
+        "info": {
+            "title": "QuantDinger API",
+            "description": (
+                "All-in-One Local-first Quant Workspace REST API. "
+                "Supports Crypto, Stocks, Forex, and Futures trading with "
+                "AI multi-agent analysis, backtesting, and strategy execution."
+            ),
+            "version": "3.0.1",
+            "contact": {"name": "QuantDinger", "email": "quantdinger@gmail.com"},
+        },
+        "host": "localhost:5000",
+        "basePath": "/api",
+        "schemes": ["http", "https"],
+        "securityDefinitions": {
+            "Bearer": {
+                "type": "apiKey",
+                "name": "Authorization",
+                "in": "header",
+                "description": "JWT token. Format: 'Bearer <token>'"
+            }
+        },
+        "tags": [
+            {"name": "auth", "description": "Authentication — login, register, OAuth, password reset"},
+            {"name": "dashboard", "description": "Dashboard summary, recent trades, pending orders"},
+            {"name": "portfolio", "description": "Manual positions, AI monitors, alerts, groups"},
+            {"name": "strategies", "description": "Trading strategy CRUD, start/stop, backtest"},
+            {"name": "quick-trade", "description": "Exchange order execution, balance, position, history"},
+            {"name": "market", "description": "Market data, symbols, watchlist, prices"},
+            {"name": "global-market", "description": "Global market overview, sentiment, heatmap, news, calendar"},
+            {"name": "indicator", "description": "Custom indicator CRUD, code verify, AI generate"},
+            {"name": "backtest", "description": "Indicator backtest run, history, precision, AI analyze"},
+            {"name": "ai-chat", "description": "AI multi-agent chat, history management"},
+            {"name": "fast-analysis", "description": "Single-symbol AI analysis with confidence/confirmation"},
+            {"name": "settings", "description": "System settings schema, values, save"},
+            {"name": "credentials", "description": "Exchange API credentials management"},
+            {"name": "billing", "description": "Membership plans, USDT payment"},
+            {"name": "community", "description": "Indicator marketplace, comments, purchases"},
+            {"name": "user", "description": "Admin user management"},
+            {"name": "ibkr", "description": "Interactive Brokers connection and trading"},
+            {"name": "mt5", "description": "MetaTrader 5 connection and trading"},
+            {"name": "polymarket", "description": "Polymarket prediction market analysis"},
+            {"name": "health", "description": "Health check endpoints"},
+        ]
+    }
+
+    app.config['SWAGGER'] = swagger_config
+    app.config['SWAGGER_TEMPLATE'] = swagger_template
+
+    from flasgger import Swagger
+    Swagger(app)
+
+    logger.info("Swagger UI available at /apidocs/")
+
+    return app

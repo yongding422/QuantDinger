@@ -23,14 +23,63 @@ community_bp = Blueprint("community", __name__)
 @login_required
 def get_market_indicators():
     """
-    获取市场指标列表
-    
-    Query params:
-        page: 页码 (default 1)
-        page_size: 每页数量 (default 12)
-        keyword: 搜索关键词
-        pricing_type: 'free' / 'paid' / 空(全部)
-        sort_by: 'newest' / 'hot' / 'price_asc' / 'price_desc' / 'rating'
+    Get market indicators list with pagination and filtering.
+
+    ---
+    tags:
+      - community
+    parameters:
+      - in: query
+        name: page
+        required: false
+        type: integer
+        description: Page number
+        default: 1
+        example: 1
+      - in: query
+        name: page_size
+        required: false
+        type: integer
+        description: Items per page (max 50)
+        default: 12
+        example: 12
+      - in: query
+        name: keyword
+        required: false
+        type: string
+        description: Search keyword
+        example: MACD
+      - in: query
+        name: pricing_type
+        required: false
+        type: string
+        description: Filter by pricing type
+        enum: [free, paid]
+        example: free
+      - in: query
+        name: sort_by
+        required: false
+        type: string
+        description: Sort order
+        enum: [newest, hot, price_asc, price_desc, rating]
+        default: newest
+        example: newest
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+    security:
+      - Bearer: []
     """
     try:
         page = int(request.args.get('page', 1))
@@ -62,7 +111,47 @@ def get_market_indicators():
 @community_bp.route("/indicators/<int:indicator_id>", methods=["GET"])
 @login_required
 def get_indicator_detail(indicator_id: int):
-    """获取指标详情"""
+    """
+    Get indicator detail by ID.
+
+    ---
+    tags:
+      - community
+    parameters:
+      - in: path
+        name: indicator_id
+        required: true
+        type: integer
+        description: Indicator ID
+        example: 123
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+      404:
+        description: Indicator not found
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 0
+            msg:
+              type: string
+              example: indicator_not_found
+    security:
+      - Bearer: []
+    """
     try:
         service = get_community_service()
         result = service.get_indicator_detail(indicator_id, user_id=g.user_id)
@@ -85,13 +174,34 @@ def get_indicator_detail(indicator_id: int):
 @login_required
 def purchase_indicator(indicator_id: int):
     """
-    购买指标
-    
-    会自动：
-    1. 检查积分是否充足
-    2. 扣除买家积分，增加卖家积分
-    3. 创建购买记录
-    4. 复制指标到买家账户
+    Purchase an indicator (deducts credits, copies to buyer account).
+
+    ---
+    tags:
+      - community
+    parameters:
+      - in: path
+        name: indicator_id
+        required: true
+        type: integer
+        description: Indicator ID to purchase
+        example: 123
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+    security:
+      - Bearer: []
     """
     try:
         service = get_community_service()
@@ -113,7 +223,44 @@ def purchase_indicator(indicator_id: int):
 @community_bp.route("/my-purchases", methods=["GET"])
 @login_required
 def get_my_purchases():
-    """获取我购买的指标列表"""
+    """
+    Get list of indicators purchased by current user.
+
+    ---
+    tags:
+      - community
+    parameters:
+      - in: query
+        name: page
+        required: false
+        type: integer
+        description: Page number
+        default: 1
+        example: 1
+      - in: query
+        name: page_size
+        required: false
+        type: integer
+        description: Items per page (max 50)
+        default: 20
+        example: 20
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+    security:
+      - Bearer: []
+    """
     try:
         page = int(request.args.get('page', 1))
         page_size = int(request.args.get('page_size', 20))
@@ -140,7 +287,50 @@ def get_my_purchases():
 @community_bp.route("/indicators/<int:indicator_id>/comments", methods=["GET"])
 @login_required
 def get_comments(indicator_id: int):
-    """获取指标评论列表"""
+    """
+    Get comments for an indicator.
+
+    ---
+    tags:
+      - community
+    parameters:
+      - in: path
+        name: indicator_id
+        required: true
+        type: integer
+        description: Indicator ID
+        example: 123
+      - in: query
+        name: page
+        required: false
+        type: integer
+        description: Page number
+        default: 1
+        example: 1
+      - in: query
+        name: page_size
+        required: false
+        type: integer
+        description: Items per page (max 50)
+        default: 20
+        example: 20
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: array
+    security:
+      - Bearer: []
+    """
     try:
         page = int(request.args.get('page', 1))
         page_size = int(request.args.get('page_size', 20))
@@ -164,13 +354,52 @@ def get_comments(indicator_id: int):
 @login_required
 def add_comment(indicator_id: int):
     """
-    添加评论
-    
-    Request body:
-        rating: 1-5 星评分
-        content: 评论内容（可选，最多500字）
-    
-    注意：只有购买过的用户可以评论，且只能评论一次
+    Add a comment to an indicator (only purchasers can comment, once per indicator).
+
+    ---
+    tags:
+      - community
+    parameters:
+      - in: path
+        name: indicator_id
+        required: true
+        type: integer
+        description: Indicator ID
+        example: 123
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - rating
+          properties:
+            rating:
+              type: integer
+              description: Rating 1-5 stars
+              minimum: 1
+              maximum: 5
+              example: 5
+            content:
+              type: string
+              description: Comment content (max 500 chars)
+              example: Great indicator!
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+    security:
+      - Bearer: []
     """
     try:
         data = request.get_json() or {}
@@ -199,11 +428,56 @@ def add_comment(indicator_id: int):
 @login_required
 def update_comment(indicator_id: int, comment_id: int):
     """
-    更新评论（只能修改自己的评论）
-    
-    Request body:
-        rating: 1-5 星评分
-        content: 评论内容（最多500字）
+    Update a comment (only the author can update their own comment).
+
+    ---
+    tags:
+      - community
+    parameters:
+      - in: path
+        name: indicator_id
+        required: true
+        type: integer
+        description: Indicator ID
+        example: 123
+      - in: path
+        name: comment_id
+        required: true
+        type: integer
+        description: Comment ID
+        example: 456
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          properties:
+            rating:
+              type: integer
+              description: Rating 1-5 stars
+              minimum: 1
+              maximum: 5
+              example: 4
+            content:
+              type: string
+              description: Comment content (max 500 chars)
+              example: Updated review
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+    security:
+      - Bearer: []
     """
     try:
         data = request.get_json() or {}
@@ -232,7 +506,36 @@ def update_comment(indicator_id: int, comment_id: int):
 @community_bp.route("/indicators/<int:indicator_id>/my-comment", methods=["GET"])
 @login_required
 def get_my_comment(indicator_id: int):
-    """获取当前用户对指定指标的评论（用于编辑）"""
+    """
+    Get current user comment for an indicator (for editing).
+
+    ---
+    tags:
+      - community
+    parameters:
+      - in: path
+        name: indicator_id
+        required: true
+        type: integer
+        description: Indicator ID
+        example: 123
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+    security:
+      - Bearer: []
+    """
     try:
         service = get_community_service()
         result = service.get_user_comment(
@@ -254,7 +557,36 @@ def get_my_comment(indicator_id: int):
 @community_bp.route("/indicators/<int:indicator_id>/performance", methods=["GET"])
 @login_required
 def get_indicator_performance(indicator_id: int):
-    """获取指标的实盘表现统计"""
+    """
+    Get live performance statistics for an indicator.
+
+    ---
+    tags:
+      - community
+    parameters:
+      - in: path
+        name: indicator_id
+        required: true
+        type: integer
+        description: Indicator ID
+        example: 123
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+    security:
+      - Bearer: []
+    """
     try:
         service = get_community_service()
         result = service.get_indicator_performance(indicator_id)
@@ -280,12 +612,61 @@ def _is_admin():
 @login_required
 def get_pending_indicators():
     """
-    获取待审核的指标列表（管理员专用）
-    
-    Query params:
-        page: 页码 (default 1)
-        page_size: 每页数量 (default 20)
-        review_status: 'pending' / 'approved' / 'rejected' / 'all'
+    Get pending indicators list for review (admin only).
+
+    ---
+    tags:
+      - community
+    parameters:
+      - in: query
+        name: page
+        required: false
+        type: integer
+        description: Page number
+        default: 1
+        example: 1
+      - in: query
+        name: page_size
+        required: false
+        type: integer
+        description: Items per page (max 100)
+        default: 20
+        example: 20
+      - in: query
+        name: review_status
+        required: false
+        type: string
+        description: Filter by review status
+        enum: [pending, approved, rejected, all]
+        default: pending
+        example: pending
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+      403:
+        description: Admin required
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 0
+            msg:
+              type: string
+              example: admin_required
+    security:
+      - Bearer: []
     """
     try:
         if not _is_admin():
@@ -313,7 +694,31 @@ def get_pending_indicators():
 @community_bp.route("/admin/review-stats", methods=["GET"])
 @login_required
 def get_review_stats():
-    """获取审核统计数据（管理员专用）"""
+    """
+    Get review statistics (admin only).
+
+    ---
+    tags:
+      - community
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+      403:
+        description: Admin required
+    security:
+      - Bearer: []
+    """
     try:
         if not _is_admin():
             return jsonify({'code': 0, 'msg': 'admin_required', 'data': None}), 403
@@ -332,11 +737,53 @@ def get_review_stats():
 @login_required
 def review_indicator(indicator_id: int):
     """
-    审核指标（管理员专用）
-    
-    Request body:
-        action: 'approve' / 'reject'
-        note: 审核备注（可选）
+    Review/approve or reject an indicator (admin only).
+
+    ---
+    tags:
+      - community
+    parameters:
+      - in: path
+        name: indicator_id
+        required: true
+        type: integer
+        description: Indicator ID
+        example: 123
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - action
+          properties:
+            action:
+              type: string
+              description: Review action
+              enum: [approve, reject]
+              example: approve
+            note:
+              type: string
+              description: Review note
+              example: Approved for quality
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+      403:
+        description: Admin required
+    security:
+      - Bearer: []
     """
     try:
         if not _is_admin():
@@ -371,10 +818,46 @@ def review_indicator(indicator_id: int):
 @login_required
 def unpublish_indicator(indicator_id: int):
     """
-    下架指标（管理员专用）
-    
-    Request body:
-        note: 下架原因（可选）
+    Unpublish/remove an indicator from the market (admin only).
+
+    ---
+    tags:
+      - community
+    parameters:
+      - in: path
+        name: indicator_id
+        required: true
+        type: integer
+        description: Indicator ID
+        example: 123
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          properties:
+            note:
+              type: string
+              description: Reason for unpublishing
+              example: Violates terms
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+      403:
+        description: Admin required
+    security:
+      - Bearer: []
     """
     try:
         if not _is_admin():
@@ -403,7 +886,38 @@ def unpublish_indicator(indicator_id: int):
 @community_bp.route("/admin/indicators/<int:indicator_id>", methods=["DELETE"])
 @login_required
 def admin_delete_indicator(indicator_id: int):
-    """删除指标（管理员专用）"""
+    """
+    Delete an indicator permanently (admin only).
+
+    ---
+    tags:
+      - community
+    parameters:
+      - in: path
+        name: indicator_id
+        required: true
+        type: integer
+        description: Indicator ID
+        example: 123
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+      403:
+        description: Admin required
+    security:
+      - Bearer: []
+    """
     try:
         if not _is_admin():
             return jsonify({'code': 0, 'msg': 'admin_required', 'data': None}), 403

@@ -66,13 +66,43 @@ def _get_user_agent() -> str:
 def get_security_config():
     """
     Get public security configuration for frontend.
-    
-    Returns:
-        turnstile_enabled: bool
-        turnstile_site_key: str
-        registration_enabled: bool
-        oauth_google_enabled: bool
-        oauth_github_enabled: bool
+
+    ---
+    tags:
+      - auth
+    parameters: []
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                turnstile_enabled:
+                  type: boolean
+                  example: true
+                turnstile_site_key:
+                  type: string
+                  example: "1x00000000000000000000AA"
+                registration_enabled:
+                  type: boolean
+                  example: true
+                oauth_google_enabled:
+                  type: boolean
+                  example: false
+                oauth_github_enabled:
+                  type: boolean
+                  example: false
+      500:
+        description: Server error
     """
     try:
         from app.services.security_service import get_security_service
@@ -91,15 +121,88 @@ def get_security_config():
 def login():
     """
     User login endpoint.
-    
-    Request body:
-        username: str
-        password: str
-        turnstile_token: str (optional, required if Turnstile is enabled)
-    
-    Returns:
-        token: JWT token
-        userinfo: User information
+
+    ---
+    tags:
+      - auth
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - username
+            - password
+          properties:
+            username:
+              type: string
+              description: Username or email address
+              example: user@example.com
+            password:
+              type: string
+              description: User password
+              example: SecurePass123!
+            turnstile_token:
+              type: string
+              description: Turnstile verification token (optional)
+              example: "0x4AAAAAA..."
+    responses:
+      200:
+        description: Login successful
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: Login successful
+            data:
+              type: object
+              properties:
+                token:
+                  type: string
+                  example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+                userinfo:
+                  type: object
+                  properties:
+                    id:
+                      type: integer
+                      example: 1
+                    username:
+                      type: string
+                      example: admin
+                    nickname:
+                      type: string
+                      example: Admin
+                    avatar:
+                      type: string
+                      example: /avatar2.jpg
+                    timezone:
+                      type: string
+                      example: America/New_York
+                    role:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          example: admin
+                        permissions:
+                          type: array
+                          items:
+                            type: string
+      400:
+        description: Bad request - missing credentials
+      401:
+        description: Unauthorized - invalid credentials
+      403:
+        description: Forbidden - account disabled or pending
+      429:
+        description: Too many requests - rate limited
+      500:
+        description: Server error
     """
     ip_address = _get_client_ip()
     user_agent = _get_user_agent()
@@ -237,12 +340,94 @@ def login_with_code():
     """
     Login with email verification code (quick login / register).
     If user doesn't exist, create a new account automatically.
-    
-    Request body:
-        email: str
-        code: str (verification code)
-        turnstile_token: str (optional)
-        referral_code: str (optional, referrer's user ID - only for new users)
+
+    ---
+    tags:
+      - auth
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - email
+            - code
+          properties:
+            email:
+              type: string
+              description: User email address
+              example: user@example.com
+            code:
+              type: string
+              description: Email verification code
+              example: "123456"
+            turnstile_token:
+              type: string
+              description: Turnstile verification token (optional)
+              example: "0x4AAAAAA..."
+            referral_code:
+              type: string
+              description: Referrer user ID (optional, for new users only)
+              example: "42"
+    responses:
+      200:
+        description: Login successful
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: Login successful (new account created)
+            data:
+              type: object
+              properties:
+                token:
+                  type: string
+                  example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+                is_new_user:
+                  type: boolean
+                  example: true
+                userinfo:
+                  type: object
+                  properties:
+                    id:
+                      type: integer
+                      example: 42
+                    username:
+                      type: string
+                      example: user
+                    nickname:
+                      type: string
+                      example: User
+                    email:
+                      type: string
+                      example: user@example.com
+                    avatar:
+                      type: string
+                      example: /avatar2.jpg
+                    timezone:
+                      type: string
+                      example: ""
+                    role:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          example: user
+                        permissions:
+                          type: array
+                          items:
+                            type: string
+      400:
+        description: Bad request - invalid email or missing code
+      403:
+        description: Forbidden - registration disabled or account disabled
+      500:
+        description: Server error
     """
     ip_address = _get_client_ip()
     user_agent = _get_user_agent()
@@ -442,11 +627,53 @@ def login_with_code():
 def send_verification_code():
     """
     Send verification code to email.
-    
-    Request body:
-        email: str
-        type: str (register, reset_password, change_password, change_email)
-        turnstile_token: str (optional)
+
+    ---
+    tags:
+      - auth
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - email
+            - type
+          properties:
+            email:
+              type: string
+              description: Email address to send code to
+              example: user@example.com
+            type:
+              type: string
+              description: Code type
+              example: register
+              enum: [register, reset_password, change_password, change_email]
+            turnstile_token:
+              type: string
+              description: Turnstile verification token (optional)
+              example: "0x4AAAAAA..."
+    responses:
+      200:
+        description: Verification code sent
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: Verification code sent
+            data:
+              type: object
+      400:
+        description: Bad request - invalid email
+      429:
+        description: Too many requests - rate limited
+      500:
+        description: Server error
     """
     ip_address = _get_client_ip()
     
@@ -532,14 +759,101 @@ def send_verification_code():
 def register():
     """
     Register new user with email verification.
-    
-    Request body:
-        email: str
-        code: str (verification code)
-        username: str
-        password: str
-        turnstile_token: str (optional)
-        referral_code: str (optional, referrer's user ID)
+
+    ---
+    tags:
+      - auth
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - email
+            - code
+            - username
+            - password
+          properties:
+            email:
+              type: string
+              description: User email address
+              example: user@example.com
+            code:
+              type: string
+              description: Email verification code
+              example: "123456"
+            username:
+              type: string
+              description: Desired username (3-30 chars, alphanumeric + underscore)
+              example: newuser
+            password:
+              type: string
+              description: User password (min 8 chars, mixed case, number, special char)
+              example: SecurePass123!
+            turnstile_token:
+              type: string
+              description: Turnstile verification token (optional)
+              example: "0x4AAAAAA..."
+            referral_code:
+              type: string
+              description: Referrer user ID (optional)
+              example: "42"
+    responses:
+      200:
+        description: Registration successful
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: Registration successful
+            data:
+              type: object
+              properties:
+                token:
+                  type: string
+                  example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+                userinfo:
+                  type: object
+                  properties:
+                    id:
+                      type: integer
+                      example: 42
+                    username:
+                      type: string
+                      example: newuser
+                    nickname:
+                      type: string
+                      example: newuser
+                    email:
+                      type: string
+                      example: user@example.com
+                    avatar:
+                      type: string
+                      example: /avatar2.jpg
+                    timezone:
+                      type: string
+                      example: ""
+                    role:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          example: user
+                        permissions:
+                          type: array
+                          items:
+                            type: string
+      400:
+        description: Bad request - validation failed
+      403:
+        description: Forbidden - registration disabled
+      500:
+        description: Server error
     """
     ip_address = _get_client_ip()
     user_agent = _get_user_agent()
@@ -705,12 +1019,57 @@ def register():
 def reset_password():
     """
     Reset password with email verification.
-    
-    Request body:
-        email: str
-        code: str (verification code)
-        new_password: str
-        turnstile_token: str (optional)
+
+    ---
+    tags:
+      - auth
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - email
+            - code
+            - new_password
+          properties:
+            email:
+              type: string
+              description: User email address
+              example: user@example.com
+            code:
+              type: string
+              description: Email verification code
+              example: "123456"
+            new_password:
+              type: string
+              description: New password (min 8 chars, mixed case, number, special char)
+              example: NewSecurePass123!
+            turnstile_token:
+              type: string
+              description: Turnstile verification token (optional)
+              example: "0x4AAAAAA..."
+    responses:
+      200:
+        description: Password reset successful
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: Password reset successful
+            data:
+              type: object
+      400:
+        description: Bad request - missing fields or invalid code
+      404:
+        description: User not found
+      500:
+        description: Server error
     """
     ip_address = _get_client_ip()
     user_agent = _get_user_agent()
@@ -780,10 +1139,50 @@ def reset_password():
 def change_password():
     """
     Change password with email verification (for logged-in users).
-    
-    Request body:
-        code: str (verification code sent to user's email)
-        new_password: str
+
+    ---
+    tags:
+      - auth
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - code
+            - new_password
+          properties:
+            code:
+              type: string
+              description: Email verification code sent to user's email
+              example: "123456"
+            new_password:
+              type: string
+              description: New password (min 8 chars, mixed case, number, special char)
+              example: NewSecurePass123!
+    responses:
+      200:
+        description: Password changed successfully
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: Password changed successfully
+            data:
+              type: object
+      400:
+        description: Bad request - missing fields or invalid code
+      401:
+        description: Unauthorized
+      500:
+        description: Server error
+    security:
+      - Bearer: []
     """
     ip_address = _get_client_ip()
     user_agent = _get_user_agent()
@@ -844,7 +1243,21 @@ def change_password():
 
 @auth_bp.route('/oauth/google', methods=['GET'])
 def oauth_google():
-    """Redirect to Google OAuth authorization page"""
+    """
+    Redirect to Google OAuth authorization page.
+
+    ---
+    tags:
+      - auth
+    parameters: []
+    responses:
+      302:
+        description: Redirect to Google OAuth
+      400:
+        description: Google OAuth not configured
+      500:
+        description: Server error
+    """
     try:
         from app.services.oauth_service import get_oauth_service
         oauth = get_oauth_service()
@@ -862,7 +1275,27 @@ def oauth_google():
 
 @auth_bp.route('/oauth/google/callback', methods=['GET'])
 def oauth_google_callback():
-    """Handle Google OAuth callback"""
+    """
+    Handle Google OAuth callback.
+
+    ---
+    tags:
+      - auth
+    parameters:
+      - in: query
+        name: code
+        type: string
+        description: OAuth authorization code
+      - in: query
+        name: state
+        type: string
+        description: OAuth state parameter
+    responses:
+      302:
+        description: Redirect to frontend with token or error
+      500:
+        description: Server error
+    """
     ip_address = _get_client_ip()
     user_agent = _get_user_agent()
     
@@ -930,7 +1363,21 @@ def oauth_google_callback():
 
 @auth_bp.route('/oauth/github', methods=['GET'])
 def oauth_github():
-    """Redirect to GitHub OAuth authorization page"""
+    """
+    Redirect to GitHub OAuth authorization page.
+
+    ---
+    tags:
+      - auth
+    parameters: []
+    responses:
+      302:
+        description: Redirect to GitHub OAuth
+      400:
+        description: GitHub OAuth not configured
+      500:
+        description: Server error
+    """
     try:
         from app.services.oauth_service import get_oauth_service
         oauth = get_oauth_service()
@@ -948,7 +1395,27 @@ def oauth_github():
 
 @auth_bp.route('/oauth/github/callback', methods=['GET'])
 def oauth_github_callback():
-    """Handle GitHub OAuth callback"""
+    """
+    Handle GitHub OAuth callback.
+
+    ---
+    tags:
+      - auth
+    parameters:
+      - in: query
+        name: code
+        type: string
+        description: OAuth authorization code
+      - in: query
+        name: state
+        type: string
+        description: OAuth state parameter
+    responses:
+      302:
+        description: Redirect to frontend with token or error
+      500:
+        description: Server error
+    """
     ip_address = _get_client_ip()
     user_agent = _get_user_agent()
     
@@ -1020,14 +1487,91 @@ def oauth_github_callback():
 
 @auth_bp.route('/logout', methods=['POST'])
 def logout():
-    """Logout (client removes token; server is stateless)."""
+    """
+    Logout endpoint (client removes token; server is stateless).
+
+    ---
+    tags:
+      - auth
+    parameters: []
+    responses:
+      200:
+        description: Logout successful
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: Logout successful
+            data:
+              type: object
+    """
     return jsonify({'code': 1, 'msg': 'Logout successful', 'data': None})
 
 
 @auth_bp.route('/info', methods=['GET'])
 @login_required
 def get_user_info():
-    """Get current user info."""
+    """
+    Get current user info.
+
+    ---
+    tags:
+      - auth
+    parameters: []
+    responses:
+      200:
+        description: User info retrieved successfully
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: Success
+            data:
+              type: object
+              properties:
+                id:
+                  type: integer
+                  example: 1
+                username:
+                  type: string
+                  example: admin
+                nickname:
+                  type: string
+                  example: Admin
+                email:
+                  type: string
+                  example: admin@example.com
+                avatar:
+                  type: string
+                  example: /avatar2.jpg
+                timezone:
+                  type: string
+                  example: America/New_York
+                role:
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                      example: admin
+                    permissions:
+                      type: array
+                      items:
+                        type: string
+      401:
+        description: Unauthorized
+      500:
+        description: Server error
+    security:
+      - Bearer: []
+    """
     try:
         user_id = getattr(g, 'user_id', 1)
         username = getattr(g, 'user', Config.ADMIN_USER)

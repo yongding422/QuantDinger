@@ -43,8 +43,34 @@ def _ensure_watchlist_table():
 @market_bp.route('/config', methods=['GET'])
 def get_public_config():
     """
-    Public config for frontend (local mode).
-    Mirrors the old PHP `/addons/quantdinger/index/getConfig` shape.
+    Get public configuration for frontend.
+
+    ---
+    tags:
+      - market
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                models:
+                  type: object
+                  properties:
+                    model_id:
+                      type: string
+                      example: openai/gpt-4o
+                qdt_cost:
+                  type: object
     """
     try:
         cfg = load_addon_config()
@@ -82,7 +108,36 @@ def get_public_config():
 
 @market_bp.route('/types', methods=['GET'])
 def get_market_types():
-    """Return supported market types for the add-watchlist modal."""
+    """
+    Get supported market types for watchlist.
+
+    ---
+    tags:
+      - market
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: array
+              items:
+                type: object
+                properties:
+                  value:
+                    type: string
+                    example: USStock
+                  i18nKey:
+                    type: string
+                    example: dashboard.analysis.market.USStock
+    """
     desired_order = ['USStock', 'Crypto', 'Forex', 'Futures']
     order_rank = {v: i for i, v in enumerate(desired_order)}
 
@@ -127,8 +182,35 @@ def get_market_types():
 @market_bp.route('/menuFooterConfig', methods=['GET'])
 def get_menu_footer_config():
     """
-    Compatibility stub for old PHP `getMenuFooterConfig`.
-    Frontend can also hardcode this locally; this endpoint remains for completeness.
+    Get menu footer configuration (compatibility stub).
+
+    ---
+    tags:
+      - market
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                contact:
+                  type: object
+                social_accounts:
+                  type: array
+                legal:
+                  type: object
+                copyright:
+                  type: string
+                  example: "© 2025-2026 QuantDinger"
     """
     data = {
         'contact': {
@@ -152,8 +234,46 @@ def get_menu_footer_config():
 @market_bp.route('/symbols/search', methods=['GET'])
 def search_symbols():
     """
-    Lightweight symbol search.
-    In local-only mode we keep this simple; frontend allows manual input when no results.
+    Search for symbols by keyword.
+
+    ---
+    tags:
+      - market
+    parameters:
+      - in: query
+        name: market
+        required: true
+        type: string
+        description: Market type (USStock, Crypto, Forex, Futures)
+        example: USStock
+      - in: query
+        name: keyword
+        required: true
+        type: string
+        description: Search keyword
+        example: AAPL
+      - in: query
+        name: limit
+        required: false
+        type: integer
+        description: Maximum number of results
+        default: 20
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: array
+              items:
+                type: object
     """
     try:
         market = (request.args.get('market') or '').strip()
@@ -172,7 +292,42 @@ def search_symbols():
 
 @market_bp.route('/symbols/hot', methods=['GET'])
 def get_hot_symbols():
-    """Return a small curated hot list per market (local-only)."""
+    """
+    Get hot/popular symbols for a market.
+
+    ---
+    tags:
+      - market
+    parameters:
+      - in: query
+        name: market
+        required: true
+        type: string
+        description: Market type
+        example: USStock
+      - in: query
+        name: limit
+        required: false
+        type: integer
+        description: Maximum number of results
+        default: 10
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: array
+              items:
+                type: object
+    """
     try:
         market = (request.args.get('market') or '').strip()
         limit = int(request.args.get('limit') or 10)
@@ -185,7 +340,40 @@ def get_hot_symbols():
 @market_bp.route('/watchlist/get', methods=['GET'])
 @login_required
 def get_watchlist():
-    """Get watchlist for the current user."""
+    """
+    Get watchlist for the current user.
+
+    ---
+    tags:
+      - market
+    security:
+      - Bearer: []
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: array
+              items:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  market:
+                    type: string
+                  symbol:
+                    type: string
+                  name:
+                    type: string
+    """
     try:
         user_id = g.user_id
         _ensure_watchlist_table()
@@ -228,7 +416,51 @@ def get_watchlist():
 @market_bp.route('/watchlist/add', methods=['POST'])
 @login_required
 def add_watchlist():
-    """Add a symbol to watchlist for the current user."""
+    """
+    Add a symbol to watchlist.
+
+    ---
+    tags:
+      - market
+    security:
+      - Bearer: []
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - market
+            - symbol
+          properties:
+            market:
+              type: string
+              description: Market type (USStock, Crypto, Forex, Futures)
+              example: USStock
+            symbol:
+              type: string
+              description: Symbol/ticker
+              example: AAPL
+            name:
+              type: string
+              description: Display name (optional)
+              example: Apple Inc.
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: null
+    """
     try:
         user_id = g.user_id
         data = request.get_json() or {}
@@ -267,7 +499,42 @@ def add_watchlist():
 @market_bp.route('/watchlist/remove', methods=['POST'])
 @login_required
 def remove_watchlist():
-    """Remove a symbol from watchlist for the current user."""
+    """
+    Remove a symbol from watchlist.
+
+    ---
+    tags:
+      - market
+    security:
+      - Bearer: []
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - symbol
+          properties:
+            symbol:
+              type: string
+              description: Symbol/ticker to remove
+              example: AAPL
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: null
+    """
     try:
         user_id = g.user_id
         data = request.get_json() or {}
@@ -318,11 +585,45 @@ def get_single_price(market: str, symbol: str) -> dict:
 @market_bp.route('/watchlist/prices', methods=['GET'])
 def get_watchlist_prices():
     """
-    批量获取自选股价格
-    
-    Params (Query String):
-        watchlist: JSON string of list of {market, symbol} objects
-        e.g. ?watchlist=[{"market":"USStock","symbol":"AAPL"}]
+    Get prices for multiple watchlist symbols.
+
+    ---
+    tags:
+      - market
+    parameters:
+      - in: query
+        name: watchlist
+        required: true
+        type: string
+        description: JSON array of {market, symbol} objects
+        example: '[{"market":"USStock","symbol":"AAPL"},{"market":"Crypto","symbol":"BTC"}]'
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: array
+              items:
+                type: object
+                properties:
+                  market:
+                    type: string
+                  symbol:
+                    type: string
+                  price:
+                    type: number
+                  change:
+                    type: number
+                  changePercent:
+                    type: number
     """
     try:
         watchlist_str = request.args.get('watchlist', '[]')
@@ -406,11 +707,49 @@ def get_watchlist_prices():
 @market_bp.route('/price', methods=['GET'])
 def get_price():
     """
-    获取单个标的价格
-    
-    参数:
-        market: 市场类型
-        symbol: 交易标的
+    Get price for a single symbol.
+
+    ---
+    tags:
+      - market
+    parameters:
+      - in: query
+        name: market
+        required: true
+        type: string
+        description: Market type
+        example: USStock
+      - in: query
+        name: symbol
+        required: true
+        type: string
+        description: Symbol/ticker
+        example: AAPL
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                market:
+                  type: string
+                symbol:
+                  type: string
+                price:
+                  type: number
+                change:
+                  type: number
+                changePercent:
+                  type: number
     """
     try:
         market = request.args.get('market', '')
@@ -443,22 +782,47 @@ def get_price():
 @market_bp.route('/stock/name', methods=['POST'])
 def get_stock_name():
     """
-    获取股票名称
-    
-    请求体:
-    {
-        "market": "USStock",
-        "symbol": "AAPL"
-    }
-    
-    响应:
-    {
-        "code": 1,
-        "msg": "success",
-        "data": {
-            "name": "Apple Inc."
-        }
-    }
+    Get stock name by symbol.
+
+    ---
+    tags:
+      - market
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - market
+            - symbol
+          properties:
+            market:
+              type: string
+              description: Market type
+              example: USStock
+            symbol:
+              type: string
+              description: Symbol/ticker
+              example: AAPL
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                name:
+                  type: string
+                  example: Apple Inc.
     """
     try:
         data = request.get_json()

@@ -32,8 +32,24 @@ def _get_client() -> IBKRClient:
 def get_status():
     """
     Get connection status.
-    
-    GET /api/ibkr/status
+    ---
+    tags:
+      - ibkr
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: true
+            data:
+              type: object
+              properties:
+                connected:
+                  type: boolean
+                  example: true
     """
     try:
         client = _get_client()
@@ -53,15 +69,61 @@ def get_status():
 def connect():
     """
     Connect to TWS / IB Gateway.
-    
-    POST /api/ibkr/connect
-    Body: {
-        "host": "127.0.0.1",      // Optional, default 127.0.0.1
-        "port": 7497,             // Optional, TWS Live:7497, TWS Paper:7496, Gateway Live:4001, Gateway Paper:4002
-        "clientId": 1,            // Optional, default 1
-        "account": "",            // Optional, specify for multi-account
-        "readonly": false         // Optional, readonly mode
-    }
+    ---
+    tags:
+      - ibkr
+    parameters:
+      - in: body
+        name: body
+        required: false
+        schema:
+          type: object
+          properties:
+            host:
+              type: string
+              description: Host address
+              example: 127.0.0.1
+            port:
+              type: integer
+              description: TWS Live=7497, Paper=7496, Gateway Live=4001, Paper=4002
+              example: 7497
+            clientId:
+              type: integer
+              description: Client ID for connection
+              example: 1
+            account:
+              type: string
+              description: Account ID for multi-account setups
+              example: ""
+            readonly:
+              type: boolean
+              description: Readonly mode
+              example: false
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: true
+            message:
+              type: string
+              example: Connected successfully
+            data:
+              type: object
+      400:
+        description: Connection failed
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: false
+            error:
+              type: string
+              example: Connection failed. Please check if TWS/Gateway is running.
     """
     global _client
     
@@ -114,8 +176,21 @@ def connect():
 def disconnect():
     """
     Disconnect from IBKR.
-    
-    POST /api/ibkr/disconnect
+    ---
+    tags:
+      - ibkr
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: true
+            message:
+              type: string
+              example: Disconnected
     """
     global _client
     
@@ -144,8 +219,31 @@ def disconnect():
 def get_account():
     """
     Get account information.
-    
-    GET /api/ibkr/account
+    ---
+    tags:
+      - ibkr
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: true
+            data:
+              type: object
+      400:
+        description: Not connected
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: false
+            error:
+              type: string
+              example: Not connected to IBKR
     """
     try:
         client = _get_client()
@@ -171,8 +269,33 @@ def get_account():
 def get_positions():
     """
     Get positions.
-    
-    GET /api/ibkr/positions
+    ---
+    tags:
+      - ibkr
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: true
+            data:
+              type: array
+              items:
+                type: object
+      400:
+        description: Not connected
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: false
+            error:
+              type: string
+              example: Not connected to IBKR
     """
     try:
         client = _get_client()
@@ -199,8 +322,33 @@ def get_positions():
 def get_orders():
     """
     Get open orders.
-    
-    GET /api/ibkr/orders
+    ---
+    tags:
+      - ibkr
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: true
+            data:
+              type: array
+              items:
+                type: object
+      400:
+        description: Not connected
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: false
+            error:
+              type: string
+              example: Not connected to IBKR
     """
     try:
         client = _get_client()
@@ -229,16 +377,84 @@ def get_orders():
 def place_order():
     """
     Place an order.
-    
-    POST /api/ibkr/order
-    Body: {
-        "symbol": "AAPL",         // Required, symbol code
-        "side": "buy",            // Required, buy or sell
-        "quantity": 10,           // Required, number of shares
-        "marketType": "USStock",  // Optional, default USStock
-        "orderType": "market",    // Optional, market or limit, default market
-        "price": 150.00           // Required for limit orders
-    }
+    ---
+    tags:
+      - ibkr
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - symbol
+            - side
+            - quantity
+          properties:
+            symbol:
+              type: string
+              description: Stock symbol
+              example: AAPL
+            side:
+              type: string
+              enum: [buy, sell]
+              description: Order side
+              example: buy
+            quantity:
+              type: number
+              description: Number of shares
+              example: 10
+            marketType:
+              type: string
+              description: Market type
+              example: USStock
+            orderType:
+              type: string
+              enum: [market, limit]
+              description: Order type
+              example: market
+            price:
+              type: number
+              description: Limit price (required for limit orders)
+              example: 150.00
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: true
+            message:
+              type: string
+              example: Order placed
+            data:
+              type: object
+              properties:
+                orderId:
+                  type: integer
+                  example: 123
+                filled:
+                  type: boolean
+                  example: false
+                avgPrice:
+                  type: number
+                  example: 0
+                status:
+                  type: string
+                  example: pending
+      400:
+        description: Validation error or not connected
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: false
+            error:
+              type: string
+              example: Missing symbol
     """
     try:
         client = _get_client()
@@ -316,8 +532,39 @@ def place_order():
 def cancel_order(order_id: int):
     """
     Cancel an order.
-    
-    DELETE /api/ibkr/order/<order_id>
+    ---
+    tags:
+      - ibkr
+    parameters:
+      - in: path
+        name: order_id
+        type: integer
+        required: true
+        description: Order ID
+        example: 123
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: true
+            message:
+              type: string
+              example: Order 123 cancelled
+      404:
+        description: Order not found
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: false
+            error:
+              type: string
+              example: Order 123 not found
     """
     try:
         client = _get_client()
@@ -354,8 +601,38 @@ def cancel_order(order_id: int):
 def get_quote():
     """
     Get real-time quote.
-    
-    GET /api/ibkr/quote?symbol=AAPL&marketType=USStock
+    ---
+    tags:
+      - ibkr
+    parameters:
+      - in: query
+        name: symbol
+        type: string
+        required: true
+        description: Stock symbol
+        example: AAPL
+      - in: query
+        name: marketType
+        type: string
+        required: false
+        description: Market type
+        example: USStock
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+      400:
+        description: Missing symbol
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: false
+            error:
+              type: string
+              example: Missing symbol
     """
     try:
         client = _get_client()

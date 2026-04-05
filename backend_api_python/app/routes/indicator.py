@@ -127,8 +127,46 @@ def get_indicators():
     """
     Get indicator list for the current user.
 
-    Response:
-      { code: 1, data: [ ... ] }
+    ---
+    tags:
+      - indicator
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: array
+              items:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                    example: 1
+                  name:
+                    type: string
+                    example: RSI Strategy
+                  code:
+                    type: string
+                    example: my_indicator_name = "RSI"
+                  description:
+                    type: string
+                    example: RSI-based trading strategy
+                  is_buy:
+                    type: integer
+                    example: 0
+                  user_id:
+                    type: integer
+                    example: 123
+    security:
+      - Bearer: []
     """
     try:
         user_id = g.user_id
@@ -169,14 +207,77 @@ def save_indicator():
     """
     Create or update an indicator for the current user.
 
-    Request (frontend sends many extra fields; we store only the essentials):
-      {
-        id: number (0 for create),
-        name: string,
-        code: string,
-        description?: string,
-        ...
-      }
+    ---
+    tags:
+      - indicator
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - code
+          properties:
+            id:
+              type: integer
+              description: Indicator ID (0 for create)
+              example: 0
+            name:
+              type: string
+              description: Indicator name
+              example: RSI Strategy
+            code:
+              type: string
+              description: Python code for the indicator
+              example: my_indicator_name = "RSI"
+            description:
+              type: string
+              description: Indicator description
+              example: RSI-based trading strategy
+            publishToCommunity:
+              type: boolean
+              description: Whether to publish to community
+              example: false
+            pricingType:
+              type: string
+              description: Pricing type (free, premium)
+              example: free
+            price:
+              type: number
+              description: Price if premium
+              example: 0
+            vipFree:
+              type: boolean
+              description: VIP free flag
+              example: false
+            previewImage:
+              type: string
+              description: Preview image URL
+              example: ""
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                id:
+                  type: integer
+                  example: 42
+                userid:
+                  type: integer
+                  example: 123
+    security:
+      - Bearer: []
     """
     try:
         data = request.get_json() or {}
@@ -302,7 +403,43 @@ def save_indicator():
 @indicator_bp.route("/deleteIndicator", methods=["POST"])
 @login_required
 def delete_indicator():
-    """Delete an indicator by id for the current user."""
+    """
+    Delete an indicator by id for the current user.
+
+    ---
+    tags:
+      - indicator
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - id
+          properties:
+            id:
+              type: integer
+              description: Indicator ID to delete
+              example: 42
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: "null"
+              example: null
+    security:
+      - Bearer: []
+    """
     try:
         data = request.get_json() or {}
         user_id = g.user_id
@@ -329,23 +466,49 @@ def delete_indicator():
 @login_required
 def get_indicator_params():
     """
-    获取指标的参数声明
-    
-    用于前端在策略创建时显示可配置的参数表单。
-    
-    Query params:
-        indicator_id: 指标ID
-        
-    Returns:
-        params: [
-            {
-                "name": "ma_fast",
-                "type": "int",
-                "default": 5,
-                "description": "短期均线周期"
-            },
-            ...
-        ]
+    Get parameter declarations for an indicator.
+
+    ---
+    tags:
+      - indicator
+    parameters:
+      - in: query
+        name: indicator_id
+        required: true
+        type: integer
+        description: Indicator ID
+        example: 42
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: array
+              items:
+                type: object
+                properties:
+                  name:
+                    type: string
+                    example: ma_fast
+                  type:
+                    type: string
+                    example: int
+                  default:
+                    type: integer
+                    example: 5
+                  description:
+                    type: string
+                    example: Short-term MA period
+    security:
+      - Bearer: []
     """
     try:
         from app.services.indicator_params import get_indicator_params as get_params
@@ -371,11 +534,58 @@ def get_indicator_params():
 @login_required
 def verify_code():
     """
-    Verify/Dry-run indicator code with mock data.
-    Checks for:
-    - Syntax errors
-    - Runtime errors
-    - Output format (must define 'output' dict)
+    Verify indicator code with mock data.
+
+    ---
+    tags:
+      - indicator
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - code
+          properties:
+            code:
+              type: string
+              description: Python code for the indicator
+              example: my_indicator_name = "RSI"
+    responses:
+      200:
+        description: Verification passed
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: Verification passed! Code executed successfully.
+            data:
+              type: object
+              properties:
+                plots_count:
+                  type: integer
+                  example: 2
+                signals_count:
+                  type: integer
+                  example: 1
+      400:
+        description: Verification failed
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 0
+            msg:
+              type: string
+              example: Missing output variable
+    security:
+      - Bearer: []
     """
     try:
         data = request.get_json() or {}
@@ -525,14 +735,36 @@ import pandas as pd
 @login_required
 def ai_generate():
     """
-    SSE endpoint to generate indicator code.
+    Generate indicator code using AI (SSE stream).
 
-    Frontend expects 'text/event-stream' with chunks:
-      data: {"content":"..."}\n\n
-    then:
-      data: [DONE]\n\n
-
-    Local-first: if OpenRouter key is not configured, we return a reasonable template.
+    ---
+    tags:
+      - indicator
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - prompt
+          properties:
+            prompt:
+              type: string
+              description: Description of the indicator to generate
+              example: Create an RSI indicator with buy signals below 30
+            existingCode:
+              type: string
+              description: Existing code to modify (optional)
+              example: my_indicator_name = "Custom"
+    responses:
+      200:
+        description: SSE stream with generated code
+        schema:
+          type: string
+          description: Server-sent event stream with code chunks
+    security:
+      - Bearer: []
     """
     data = request.get_json() or {}
     prompt = (data.get("prompt") or "").strip()
@@ -740,24 +972,64 @@ IMPORTANT: Output Python code directly, without explanations, without descriptio
 @login_required
 def call_indicator():
     """
-    调用另一个指标（供前端 Pyodide 环境使用）
-    
-    POST /api/indicator/callIndicator
-    Body: {
-        "indicatorRef": int | str,  # 指标ID或名称
-        "klineData": List[Dict],      # K线数据
-        "params": Dict,              # 传递给被调用指标的参数（可选）
-        "currentIndicatorId": int     # 当前指标ID（用于循环依赖检测，可选）
-    }
-    
-    Returns:
-        {
-            "code": 1,
-            "data": {
-                "df": List[Dict],    # 执行后的DataFrame（转换为JSON）
-                "columns": List[str]  # DataFrame的列名
-            }
-        }
+    Call another indicator (for frontend Pyodide environment).
+
+    ---
+    tags:
+      - indicator
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - indicatorRef
+            - klineData
+          properties:
+            indicatorRef:
+              type: integer
+              description: Indicator ID or name to call
+              example: 42
+            klineData:
+              type: array
+              description: K-line data
+              items:
+                type: object
+            params:
+              type: object
+              description: Parameters to pass to the called indicator
+              example:
+                ma_fast: 5
+            currentIndicatorId:
+              type: integer
+              description: Current indicator ID for circular dependency detection
+              example: 10
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                df:
+                  type: array
+                  items:
+                    type: object
+                columns:
+                  type: array
+                  items:
+                    type: string
+    security:
+      - Bearer: []
     """
     try:
         data = request.get_json() or {}

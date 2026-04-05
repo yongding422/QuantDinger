@@ -88,15 +88,53 @@ def _normalize_lang(lang: str | None) -> str:
 @backtest_bp.route('/backtest/precision-info', methods=['GET'])
 def get_precision_info():
     """
-    获取回测精度信息（用于前端提示）
-    
-    Params (Query String):
-        market: 市场类型
-        startDate: 开始日期 (YYYY-MM-DD)
-        endDate: 结束日期 (YYYY-MM-DD)
-        
-    Returns:
-        精度信息，包含推荐的执行时间框架和预估K线数量
+    Get backtest precision information.
+
+    ---
+    tags:
+      - backtest
+    parameters:
+      - in: query
+        name: market
+        required: false
+        type: string
+        description: Market type
+        example: crypto
+      - in: query
+        name: startDate
+        required: true
+        type: string
+        format: date
+        description: Start date (YYYY-MM-DD)
+        example: 2024-01-01
+      - in: query
+        name: endDate
+        required: true
+        type: string
+        format: date
+        description: End date (YYYY-MM-DD)
+        example: 2024-03-01
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                recommended_timeframe:
+                  type: string
+                  example: 15m
+                estimated_bars:
+                  type: integer
+                  example: 10000
     """
     try:
         # Use request.args for GET params
@@ -127,18 +165,110 @@ def get_precision_info():
 def run_backtest():
     """
     Run indicator backtest for the current user.
-    
-    Params:
-        indicatorId: Indicator ID (optional)
-        indicatorCode: Indicator Python code
-        symbol: Symbol
-        market: Market type
-        timeframe: Timeframe
-        startDate: Start date (YYYY-MM-DD)
-        endDate: End date (YYYY-MM-DD)
-        initialCapital: Initial capital (default 10000)
-        commission: Commission rate (default 0.001)
-        enableMtf: Enable multi-timeframe backtest (default true, only for crypto)
+
+    ---
+    tags:
+      - backtest
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - indicatorCode
+            - symbol
+            - market
+            - timeframe
+            - startDate
+            - endDate
+          properties:
+            indicatorId:
+              type: integer
+              description: Indicator ID (optional if indicatorCode provided)
+              example: 42
+            indicatorCode:
+              type: string
+              description: Python code for the indicator
+              example: my_indicator_name = "RSI"
+            symbol:
+              type: string
+              description: Trading symbol
+              example: BTCUSDT
+            market:
+              type: string
+              description: Market type
+              example: crypto
+            timeframe:
+              type: string
+              description: Timeframe
+              example: 1D
+            startDate:
+              type: string
+              format: date
+              description: Start date (YYYY-MM-DD)
+              example: 2024-01-01
+            endDate:
+              type: string
+              format: date
+              description: End date (YYYY-MM-DD)
+              example: 2024-03-01
+            initialCapital:
+              type: number
+              description: Initial capital
+              example: 10000
+            commission:
+              type: number
+              description: Commission rate
+              example: 0.001
+            slippage:
+              type: number
+              description: Slippage
+              example: 0.0
+            leverage:
+              type: integer
+              description: Leverage
+              example: 1
+            tradeDirection:
+              type: string
+              description: Trade direction (long, short, both)
+              example: long
+            enableMtf:
+              type: boolean
+              description: Enable multi-timeframe backtest (crypto only)
+              example: true
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: Backtest succeeded
+            data:
+              type: object
+              properties:
+                runId:
+                  type: integer
+                  example: 100
+                result:
+                  type: object
+                  properties:
+                    totalReturn:
+                      type: number
+                      example: 0.15
+                    maxDrawdown:
+                      type: number
+                      example: 0.08
+                    sharpeRatio:
+                      type: number
+                      example: 1.5
+    security:
+      - Bearer: []
     """
     try:
         data = request.get_json()
@@ -346,13 +476,74 @@ def get_backtest_history():
     """
     Get backtest run history for the current user.
 
-    Params (Query String):
-        limit: Page size (default 50, max 200)
-        offset: Offset (default 0)
-        indicatorId: Optional indicator id filter
-        symbol: Optional symbol filter
-        market: Optional market filter
-        timeframe: Optional timeframe filter
+    ---
+    tags:
+      - backtest
+    parameters:
+      - in: query
+        name: limit
+        required: false
+        type: integer
+        description: Page size (default 50, max 200)
+        example: 50
+      - in: query
+        name: offset
+        required: false
+        type: integer
+        description: Offset (default 0)
+        example: 0
+      - in: query
+        name: indicatorId
+        required: false
+        type: integer
+        description: Filter by indicator ID
+        example: 42
+      - in: query
+        name: symbol
+        required: false
+        type: string
+        description: Filter by symbol
+        example: BTCUSDT
+      - in: query
+        name: market
+        required: false
+        type: string
+        description: Filter by market
+        example: crypto
+      - in: query
+        name: timeframe
+        required: false
+        type: string
+        description: Filter by timeframe
+        example: 1D
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: OK
+            data:
+              type: array
+              items:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                    example: 100
+                  symbol:
+                    type: string
+                    example: BTCUSDT
+                  timeframe:
+                    type: string
+                    example: 1D
+    security:
+      - Bearer: []
     """
     try:
         # Use current user's ID
@@ -393,8 +584,41 @@ def get_backtest_run():
     """
     Get a backtest run detail by run id for the current user.
 
-    Params (Query String):
-        runId: Backtest run id (required)
+    ---
+    tags:
+      - backtest
+    parameters:
+      - in: query
+        name: runId
+        required: true
+        type: integer
+        description: Backtest run id
+        example: 100
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: OK
+            data:
+              type: object
+              properties:
+                id:
+                  type: integer
+                  example: 100
+                symbol:
+                  type: string
+                  example: BTCUSDT
+                result:
+                  type: object
+    security:
+      - Bearer: []
     """
     try:
         user_id = g.user_id
@@ -631,11 +855,57 @@ def _heuristic_ai_advice(runs: list[dict], lang: str) -> str:
 @login_required
 def ai_analyze_backtest_runs():
     """
-    AI analyze selected backtest runs and provide strategy_config tuning suggestions
-    for the current user.
+    AI analyze selected backtest runs and provide strategy tuning suggestions.
 
-    Params:
-        runIds: list[int] (required)
+    ---
+    tags:
+      - backtest
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - runIds
+          properties:
+            runIds:
+              type: array
+              description: List of backtest run IDs to analyze
+              items:
+                type: integer
+              example: [100, 101, 102]
+            lang:
+              type: string
+              description: Language code for output
+              example: en-US
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: OK
+            data:
+              type: object
+              properties:
+                analysis:
+                  type: string
+                  description: AI-generated analysis and suggestions
+                  example: Strategy shows good win rate but...
+                mode:
+                  type: string
+                  example: llm
+                lang:
+                  type: string
+                  example: en-US
+    security:
+      - Bearer: []
     """
     try:
         data = request.get_json() or {}

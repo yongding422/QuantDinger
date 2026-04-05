@@ -24,12 +24,48 @@ user_bp = Blueprint('user_manage', __name__)
 @admin_required
 def list_users():
     """
-    List all users (admin only).
-    
-    Query params:
-        page: int (default 1)
-        page_size: int (default 20, max 100)
-        search: str (optional, search by username/email/nickname)
+    List all users with pagination and search (admin only).
+
+    ---
+    tags:
+      - user
+    parameters:
+      - in: query
+        name: page
+        required: false
+        type: integer
+        description: Page number
+        default: 1
+        example: 1
+      - in: query
+        name: page_size
+        required: false
+        type: integer
+        description: Items per page (max 100)
+        default: 20
+        example: 20
+      - in: query
+        name: search
+        required: false
+        type: string
+        description: Search by username, email, or nickname
+        example: john
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+    security:
+      - Bearer: []
     """
     try:
         page = request.args.get('page', 1, type=int)
@@ -53,7 +89,38 @@ def list_users():
 @login_required
 @admin_required
 def get_user_detail():
-    """Get user detail by ID (admin only)"""
+    """
+    Get user detail by ID (admin only).
+
+    ---
+    tags:
+      - user
+    parameters:
+      - in: query
+        name: id
+        required: true
+        type: integer
+        description: User ID
+        example: 123
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+      404:
+        description: User not found
+    security:
+      - Bearer: []
+    """
     try:
         user_id = request.args.get('id', type=int)
         if not user_id:
@@ -79,13 +146,61 @@ def get_user_detail():
 def create_user():
     """
     Create a new user (admin only).
-    
-    Request body:
-        username: str (required)
-        password: str (required)
-        email: str (optional)
-        nickname: str (optional)
-        role: str (optional, default 'user')
+
+    ---
+    tags:
+      - user
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - username
+            - password
+          properties:
+            username:
+              type: string
+              description: Username
+              example: john_doe
+            password:
+              type: string
+              description: Password
+              example: securepass123
+            email:
+              type: string
+              description: Email address
+              example: john@example.com
+            nickname:
+              type: string
+              description: Display name
+              example: John
+            role:
+              type: string
+              description: User role
+              default: user
+              example: user
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: User created successfully
+            data:
+              type: object
+              properties:
+                id:
+                  type: integer
+                  example: 123
+    security:
+      - Bearer: []
     """
     try:
         data = request.get_json() or {}
@@ -110,15 +225,55 @@ def create_user():
 def update_user():
     """
     Update user information (admin only).
-    
-    Query params:
-        id: int (required)
-    
-    Request body:
-        email: str (optional)
-        nickname: str (optional)
-        role: str (optional)
-        status: str (optional)
+
+    ---
+    tags:
+      - user
+    parameters:
+      - in: query
+        name: id
+        required: true
+        type: integer
+        description: User ID
+        example: 123
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          properties:
+            email:
+              type: string
+              description: Email address
+              example: john@example.com
+            nickname:
+              type: string
+              description: Display name
+              example: John
+            role:
+              type: string
+              description: User role
+              example: admin
+            status:
+              type: string
+              description: User status
+              example: active
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: User updated successfully
+            data:
+              type: object
+    security:
+      - Bearer: []
     """
     try:
         user_id = request.args.get('id', type=int)
@@ -142,7 +297,38 @@ def update_user():
 @login_required
 @admin_required
 def delete_user():
-    """Delete a user (admin only)"""
+    """
+    Delete a user (admin only).
+
+    ---
+    tags:
+      - user
+    parameters:
+      - in: query
+        name: id
+        required: true
+        type: integer
+        description: User ID
+        example: 123
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: User deleted successfully
+            data:
+              type: object
+      400:
+        description: Cannot delete yourself
+    security:
+      - Bearer: []
+    """
     try:
         user_id = request.args.get('id', type=int)
         if not user_id:
@@ -168,11 +354,45 @@ def delete_user():
 @admin_required
 def reset_user_password():
     """
-    Reset a user's password (admin only).
-    
-    Request body:
-        user_id: int (required)
-        new_password: str (required)
+    Reset a user password (admin only).
+
+    ---
+    tags:
+      - user
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - user_id
+            - new_password
+          properties:
+            user_id:
+              type: integer
+              description: User ID
+              example: 123
+            new_password:
+              type: string
+              description: New password (min 6 chars)
+              example: newpass123
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: Password reset successfully
+            data:
+              type: object
+    security:
+      - Bearer: []
     """
     try:
         data = request.get_json() or {}
@@ -202,7 +422,34 @@ def reset_user_password():
 @login_required
 @admin_required
 def get_roles():
-    """Get available roles and their permissions"""
+    """
+    Get available roles and their permissions.
+
+    ---
+    tags:
+      - user
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                roles:
+                  type: array
+                  items:
+                    type: object
+    security:
+      - Bearer: []
+    """
     service = get_user_service()
     
     roles = []
@@ -227,12 +474,49 @@ def get_roles():
 @admin_required
 def set_user_credits():
     """
-    Set user credits (admin only).
-    
-    Request body:
-        user_id: int (required)
-        credits: int (required)
-        remark: str (optional)
+    Set user credits balance (admin only).
+
+    ---
+    tags:
+      - user
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - user_id
+            - credits
+          properties:
+            user_id:
+              type: integer
+              description: User ID
+              example: 123
+            credits:
+              type: integer
+              description: Credits amount (non-negative)
+              example: 1000
+            remark:
+              type: string
+              description: Remark for the operation
+              example: Manual adjustment
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: Credits updated successfully
+            data:
+              type: object
+    security:
+      - Bearer: []
     """
     try:
         from app.services.billing_service import get_billing_service
@@ -266,12 +550,51 @@ def set_user_credits():
 def set_user_vip():
     """
     Set user VIP status (admin only).
-    
-    Request body:
-        user_id: int (required)
-        vip_days: int (optional, 0 to cancel VIP, positive number to grant VIP for days)
-        vip_expires_at: str (optional, ISO format datetime, overrides vip_days if provided)
-        remark: str (optional)
+
+    ---
+    tags:
+      - user
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - user_id
+          properties:
+            user_id:
+              type: integer
+              description: User ID
+              example: 123
+            vip_days:
+              type: integer
+              description: VIP days (0 to cancel, positive to grant)
+              example: 30
+            vip_expires_at:
+              type: string
+              description: ISO format datetime (overrides vip_days)
+              example: 2025-12-31T23:59:59Z
+            remark:
+              type: string
+              description: Remark for the operation
+              example: VIP grant
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: VIP status updated successfully
+            data:
+              type: object
+    security:
+      - Bearer: []
     """
     try:
         from datetime import datetime, timedelta, timezone
@@ -322,12 +645,48 @@ def set_user_vip():
 @admin_required
 def get_user_credits_log():
     """
-    Get user credits log (admin only).
-    
-    Query params:
-        user_id: int (required)
-        page: int (default 1)
-        page_size: int (default 20)
+    Get user credits transaction log (admin only).
+
+    ---
+    tags:
+      - user
+    parameters:
+      - in: query
+        name: user_id
+        required: true
+        type: integer
+        description: User ID
+        example: 123
+      - in: query
+        name: page
+        required: false
+        type: integer
+        description: Page number
+        default: 1
+        example: 1
+      - in: query
+        name: page_size
+        required: false
+        type: integer
+        description: Items per page (max 100)
+        default: 20
+        example: 20
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+    security:
+      - Bearer: []
     """
     try:
         from app.services.billing_service import get_billing_service
@@ -353,7 +712,29 @@ def get_user_credits_log():
 @user_bp.route('/profile', methods=['GET'])
 @login_required
 def get_profile():
-    """Get current user's profile with billing info and notification settings"""
+    """
+    Get current user profile with billing info and notification settings.
+
+    ---
+    tags:
+      - user
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+    security:
+      - Bearer: []
+    """
     try:
         import json
         from app.services.billing_service import get_billing_service
@@ -409,15 +790,46 @@ def get_profile():
 @login_required
 def update_profile():
     """
-    Update current user's profile (limited fields).
-    
-    Request body:
-        nickname: str (optional)
-        avatar: str (optional)
-        timezone: str (optional, IANA id; empty = follow client)
-    
-    Note: Email cannot be changed after registration (for security).
-          Only admin can change user email via User Management.
+    Update current user profile (limited fields).
+
+    ---
+    tags:
+      - user
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          properties:
+            nickname:
+              type: string
+              description: Display name
+              example: John
+            avatar:
+              type: string
+              description: Avatar URL
+              example: https://example.com/avatar.jpg
+            timezone:
+              type: string
+              description: IANA timezone ID (empty = follow client)
+              example: America/New_York
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: Profile updated successfully
+            data:
+              type: object
+    security:
+      - Bearer: []
     """
     try:
         user_id = getattr(g, 'user_id', None)
@@ -461,11 +873,42 @@ def update_profile():
 @login_required
 def get_my_credits_log():
     """
-    Get current user's credits log.
-    
-    Query params:
-        page: int (default 1)
-        page_size: int (default 20)
+    Get current user credits transaction log.
+
+    ---
+    tags:
+      - user
+    parameters:
+      - in: query
+        name: page
+        required: false
+        type: integer
+        description: Page number
+        default: 1
+        example: 1
+      - in: query
+        name: page_size
+        required: false
+        type: integer
+        description: Items per page (max 100)
+        default: 20
+        example: 20
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+    security:
+      - Bearer: []
     """
     try:
         from app.services.billing_service import get_billing_service
@@ -491,17 +934,52 @@ def get_my_credits_log():
 def get_my_referrals():
     """
     Get list of users referred by current user.
-    
-    Query params:
-        page: int (default 1)
-        page_size: int (default 20)
-    
-    Returns:
-        list: Users referred by current user (id, username, nickname, avatar, created_at)
-        total: Total count of referrals
-        referral_code: Current user's referral code (user ID)
-        referral_bonus: Credits earned per referral
-        register_bonus: Credits new users get on registration
+
+    ---
+    tags:
+      - user
+    parameters:
+      - in: query
+        name: page
+        required: false
+        type: integer
+        description: Page number
+        default: 1
+        example: 1
+      - in: query
+        name: page_size
+        required: false
+        type: integer
+        description: Items per page (max 100)
+        default: 20
+        example: 20
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                list:
+                  type: array
+                total:
+                  type: integer
+                referral_code:
+                  type: string
+                referral_bonus:
+                  type: integer
+                register_bonus:
+                  type: integer
+    security:
+      - Bearer: []
     """
     try:
         import os
@@ -572,15 +1050,38 @@ def get_my_referrals():
 @login_required
 def get_notification_settings():
     """
-    Get current user's notification settings.
-    
-    Returns:
-        notification_settings: {
-            default_channels: ['browser', 'telegram', ...],
-            telegram_chat_id: str,
-            email: str (optional, override for notifications),
-            discord_webhook: str (optional)
-        }
+    Get current user notification settings.
+
+    ---
+    tags:
+      - user
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                default_channels:
+                  type: array
+                  items:
+                    type: string
+                telegram_chat_id:
+                  type: string
+                email:
+                  type: string
+                discord_webhook:
+                  type: string
+    security:
+      - Bearer: []
     """
     try:
         import json
@@ -628,14 +1129,57 @@ def get_notification_settings():
 @login_required
 def update_notification_settings():
     """
-    Update current user's notification settings.
-    
-    Request body:
-        default_channels: list of str (optional, e.g. ['browser', 'telegram'])
-        telegram_bot_token: str (optional, user's own Telegram bot token)
-        telegram_chat_id: str (optional)
-        email: str (optional, for notification override)
-        discord_webhook: str (optional)
+    Update current user notification settings.
+
+    ---
+    tags:
+      - user
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          properties:
+            default_channels:
+              type: array
+              description: Notification channels
+              items:
+                type: string
+                enum: [browser, email, telegram, discord, webhook, phone]
+              example: [browser, telegram]
+            telegram_bot_token:
+              type: string
+              description: User Telegram bot token
+              example: 123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11
+            telegram_chat_id:
+              type: string
+              description: Telegram chat ID
+              example: "-1001234567890"
+            email:
+              type: string
+              description: Email for notifications
+              example: user@example.com
+            discord_webhook:
+              type: string
+              description: Discord webhook URL
+              example: https://discord.com/api/webhooks/...
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: Notification settings updated
+            data:
+              type: object
+    security:
+      - Bearer: []
     """
     try:
         import json
@@ -696,8 +1240,30 @@ def update_notification_settings():
 @login_required
 def test_notification_settings():
     """
-    Send a test notification using the current user's saved notification_settings
-    (save settings first via PUT /notification-settings).
+    Send a test notification using current user saved settings.
+
+    ---
+    tags:
+      - user
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: Test notification sent
+            data:
+              type: object
+              properties:
+                results:
+                  type: object
+    security:
+      - Bearer: []
     """
     try:
         import json
@@ -775,11 +1341,44 @@ def test_notification_settings():
 @login_required
 def change_password():
     """
-    Change current user's password.
-    
-    Request body:
-        old_password: str (required)
-        new_password: str (required)
+    Change current user password.
+
+    ---
+    tags:
+      - user
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - new_password
+          properties:
+            old_password:
+              type: string
+              description: Current password (not required if no password set)
+              example: oldpass123
+            new_password:
+              type: string
+              description: New password (min 6 chars)
+              example: newpass123
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: Password changed successfully
+            data:
+              type: object
+    security:
+      - Bearer: []
     """
     try:
         user_id = getattr(g, 'user_id', None)
@@ -867,16 +1466,75 @@ def _safe_json_loads(s, default=None):
 def get_system_strategies():
     """
     Get all strategies across the entire system (admin only).
-    Returns strategy details with user info, positions, PnL, indicators, etc.
 
-    Query params:
-        page: int (default 1)
-        page_size: int (default 20, max 100)
-        status: str (optional, filter by status: running/stopped/all)
-        execution_mode: str (optional, live/signal — omit or all for any)
-        search: str (optional, search by strategy name/symbol/username)
-        sort_by: str (optional, whitelist; default status+updated_at)
-        sort_order: str (optional, asc or desc; default desc when sort_by set)
+    ---
+    tags:
+      - user
+    parameters:
+      - in: query
+        name: page
+        required: false
+        type: integer
+        description: Page number
+        default: 1
+        example: 1
+      - in: query
+        name: page_size
+        required: false
+        type: integer
+        description: Items per page (max 100)
+        default: 20
+        example: 20
+      - in: query
+        name: status
+        required: false
+        type: string
+        description: Filter by status
+        enum: [running, stopped, all]
+        example: running
+      - in: query
+        name: execution_mode
+        required: false
+        type: string
+        description: Filter by execution mode
+        enum: [live, signal]
+        example: live
+      - in: query
+        name: search
+        required: false
+        type: string
+        description: Search by strategy name, symbol, or username
+        example: AAPL
+      - in: query
+        name: sort_by
+        required: false
+        type: string
+        description: Sort field
+        example: total_pnl
+      - in: query
+        name: sort_order
+        required: false
+        type: string
+        description: Sort order
+        enum: [asc, desc]
+        default: desc
+        example: desc
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+    security:
+      - Bearer: []
     """
     try:
         page = request.args.get('page', 1, type=int)
@@ -1218,13 +1876,54 @@ def get_system_strategies():
 def get_admin_orders():
     """
     Get all orders across the system (admin only).
-    Merges qd_membership_orders and qd_usdt_orders into a unified list.
 
-    Query params:
-        page: int (default 1)
-        page_size: int (default 20, max 100)
-        status: str (optional, filter by status: paid/pending/confirmed/expired/all)
-        search: str (optional, search by username/email)
+    ---
+    tags:
+      - user
+    parameters:
+      - in: query
+        name: page
+        required: false
+        type: integer
+        description: Page number
+        default: 1
+        example: 1
+      - in: query
+        name: page_size
+        required: false
+        type: integer
+        description: Items per page (max 100)
+        default: 20
+        example: 20
+      - in: query
+        name: status
+        required: false
+        type: string
+        description: Filter by status
+        enum: [paid, pending, confirmed, expired, all]
+        example: paid
+      - in: query
+        name: search
+        required: false
+        type: string
+        description: Search by username or email
+        example: john
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+    security:
+      - Bearer: []
     """
     try:
         page = request.args.get('page', 1, type=int)
@@ -1424,12 +2123,47 @@ def get_admin_orders():
 def get_admin_ai_stats():
     """
     Get AI analysis usage statistics across the system (admin only).
-    Does NOT expose analysis results, only aggregated counts/stats.
 
-    Query params:
-        page: int (default 1)
-        page_size: int (default 20, max 100)
-        search: str (optional, search by username)
+    ---
+    tags:
+      - user
+    parameters:
+      - in: query
+        name: page
+        required: false
+        type: integer
+        description: Page number
+        default: 1
+        example: 1
+      - in: query
+        name: page_size
+        required: false
+        type: integer
+        description: Items per page (max 100)
+        default: 20
+        example: 20
+      - in: query
+        name: search
+        required: false
+        type: string
+        description: Search by username
+        example: john
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+    security:
+      - Bearer: []
     """
     try:
         page = request.args.get('page', 1, type=int)

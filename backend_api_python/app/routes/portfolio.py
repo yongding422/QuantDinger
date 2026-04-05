@@ -132,7 +132,64 @@ def _get_single_price(market: str, symbol: str, force_refresh: bool = False) -> 
 @portfolio_bp.route('/positions', methods=['GET'])
 @login_required
 def get_positions():
-    """Get all manual positions with current prices for the current user."""
+    """Get all manual positions with current prices for the current user.
+
+    ---
+    tags:
+      - portfolio
+    parameters:
+      - in: query
+        name: refresh
+        type: string
+        description: Force refresh (skip cache). Use '1', 'true', or 'yes'.
+        required: false
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: array
+              items:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                    example: 1
+                  market:
+                    type: string
+                    example: binance
+                  symbol:
+                    type: string
+                    example: BTCUSDT
+                  side:
+                    type: string
+                    example: long
+                  quantity:
+                    type: number
+                    example: 1.5
+                  entry_price:
+                    type: number
+                    example: 45000.0
+                  current_price:
+                    type: number
+                    example: 46500.0
+                  pnl:
+                    type: number
+                    example: 2250.0
+                  pnl_percent:
+                    type: number
+                    example: 3.33
+    security:
+      - Bearer: []
+    """
     try:
         user_id = g.user_id
         # Check if force refresh (skip cache)
@@ -237,7 +294,86 @@ def get_positions():
 @portfolio_bp.route('/positions', methods=['POST'])
 @login_required
 def add_position():
-    """Add a new manual position for the current user."""
+    """Add a new manual position for the current user.
+
+    ---
+    tags:
+      - portfolio
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - market
+            - symbol
+            - quantity
+            - entry_price
+          properties:
+            market:
+              type: string
+              description: Exchange market (e.g., binance, okx, gate)
+              example: binance
+            symbol:
+              type: string
+              description: Trading symbol (e.g., BTCUSDT, ETH/USDT)
+              example: BTCUSDT
+            name:
+              type: string
+              description: Custom name for the position
+              example: Bitcoin
+            side:
+              type: string
+              description: Position side: long or short
+              example: long
+            quantity:
+              type: number
+              description: Position quantity
+              example: 1.5
+            entry_price:
+              type: number
+              description: Entry price
+              example: 45000.0
+            entry_time:
+              type: integer
+              description: Unix timestamp of entry
+              example: 1704067200
+            notes:
+              type: string
+              description: Notes about the position
+              example: Long term hold
+            tags:
+              type: array
+              items:
+                type: string
+              description: Tags for organization
+              example: ["tech", "crypto"]
+            group_name:
+              type: string
+              description: Group name for grouping positions
+              example: main_portfolio
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                id:
+                  type: integer
+                  example: 123
+    security:
+      - Bearer: []
+    """
     try:
         user_id = g.user_id
         data = request.get_json() or {}
@@ -300,7 +436,67 @@ def add_position():
 @portfolio_bp.route('/positions/<int:position_id>', methods=['PUT'])
 @login_required
 def update_position(position_id):
-    """Update an existing position for the current user."""
+    """Update an existing position for the current user.
+
+    ---
+    tags:
+      - portfolio
+    parameters:
+      - in: path
+        name: position_id
+        type: integer
+        required: true
+        description: Position ID to update
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          properties:
+            name:
+              type: string
+              description: Updated name
+            quantity:
+              type: number
+              description: Updated quantity
+            entry_price:
+              type: number
+              description: Updated entry price
+            entry_time:
+              type: integer
+              description: Updated entry timestamp
+            notes:
+              type: string
+              description: Updated notes
+            tags:
+              type: array
+              items:
+                type: string
+              description: Updated tags
+            group_name:
+              type: string
+              description: Updated group name
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                null:
+                  type: object
+                  example: null
+    security:
+      - Bearer: []
+    """
     try:
         user_id = g.user_id
         data = request.get_json() or {}
@@ -369,7 +565,38 @@ def update_position(position_id):
 @portfolio_bp.route('/positions/<int:position_id>', methods=['DELETE'])
 @login_required
 def delete_position(position_id):
-    """Delete a position for the current user."""
+    """Delete a position for the current user.
+
+    ---
+    tags:
+      - portfolio
+    parameters:
+      - in: path
+        name: position_id
+        type: integer
+        required: true
+        description: Position ID to delete
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                null:
+                  type: object
+                  example: null
+    security:
+      - Bearer: []
+    """
     try:
         user_id = g.user_id
         with get_db_connection() as db:
@@ -391,7 +618,64 @@ def delete_position(position_id):
 @portfolio_bp.route('/summary', methods=['GET'])
 @login_required
 def get_portfolio_summary():
-    """Get portfolio summary with total value, PnL, and market distribution for the current user."""
+    """Get portfolio summary with total value, PnL, and market distribution for the current user.
+
+    ---
+    tags:
+      - portfolio
+    parameters:
+      - in: query
+        name: refresh
+        type: string
+        description: Force refresh (skip cache). Use '1', 'true', or 'yes'.
+        required: false
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                total_cost:
+                  type: number
+                  example: 67500.0
+                total_market_value:
+                  type: number
+                  example: 69750.0
+                total_pnl:
+                  type: number
+                  example: 2250.0
+                total_pnl_percent:
+                  type: number
+                  example: 3.33
+                position_count:
+                  type: integer
+                  example: 5
+                market_distribution:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      market:
+                        type: string
+                        example: binance
+                      value:
+                        type: number
+                        example: 69750.0
+                      percent:
+                        type: number
+                        example: 100.0
+    security:
+      - Bearer: []
+    """
     try:
         user_id = g.user_id
         # Check if force refresh
@@ -513,7 +797,77 @@ def get_portfolio_summary():
 @portfolio_bp.route('/monitors', methods=['GET'])
 @login_required
 def get_monitors():
-    """Get all position monitors for the current user."""
+    """Get all position monitors for the current user.
+
+    ---
+    tags:
+      - portfolio
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: array
+              items:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                    example: 1
+                  name:
+                    type: string
+                    example: Daily AI Analysis
+                  position_ids:
+                    type: array
+                    items:
+                      type: integer
+                    example: [1, 2, 3]
+                  monitor_type:
+                    type: string
+                    example: ai
+                  config:
+                    type: object
+                    properties:
+                      interval_minutes:
+                        type: integer
+                        example: 60
+                  notification_config:
+                    type: object
+                    properties:
+                      enabled:
+                        type: boolean
+                        example: true
+                  is_active:
+                    type: boolean
+                    example: true
+                  last_run_at:
+                    type: string
+                    format: date-time
+                  next_run_at:
+                    type: string
+                    format: date-time
+                  last_result:
+                    type: object
+                  run_count:
+                    type: integer
+                    example: 10
+                  created_at:
+                    type: string
+                    format: date-time
+                  updated_at:
+                    type: string
+                    format: date-time
+    security:
+      - Bearer: []
+    """
     try:
         user_id = g.user_id
         with get_db_connection() as db:
@@ -559,7 +913,76 @@ def get_monitors():
 @portfolio_bp.route('/monitors', methods=['POST'])
 @login_required
 def add_monitor():
-    """Add a new position monitor for the current user."""
+    """Add a new position monitor for the current user.
+
+    ---
+    tags:
+      - portfolio
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - name
+          properties:
+            name:
+              type: string
+              description: Monitor name
+              example: Daily AI Analysis
+            position_ids:
+              type: array
+              items:
+                type: integer
+              description: Position IDs to monitor
+              example: [1, 2, 3]
+            monitor_type:
+              type: string
+              description: Monitor type (ai, price_alert, pnl_alert)
+              example: ai
+            config:
+              type: object
+              description: Monitor configuration
+              properties:
+                run_interval_minutes:
+                  type: integer
+                  example: 60
+            notification_config:
+              type: object
+              description: Notification settings
+              properties:
+                enabled:
+                  type: boolean
+                  example: true
+                channels:
+                  type: array
+                  items:
+                    type: string
+            is_active:
+              type: boolean
+              example: true
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                id:
+                  type: integer
+                  example: 123
+    security:
+      - Bearer: []
+    """
     try:
         user_id = g.user_id
         data = request.get_json() or {}
@@ -627,7 +1050,64 @@ def add_monitor():
 @portfolio_bp.route('/monitors/<int:monitor_id>', methods=['PUT'])
 @login_required
 def update_monitor(monitor_id):
-    """Update an existing monitor for the current user."""
+    """Update an existing monitor for the current user.
+
+    ---
+    tags:
+      - portfolio
+    parameters:
+      - in: path
+        name: monitor_id
+        type: integer
+        required: true
+        description: Monitor ID to update
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          properties:
+            name:
+              type: string
+              description: Updated monitor name
+            position_ids:
+              type: array
+              items:
+                type: integer
+              description: Updated position IDs
+            monitor_type:
+              type: string
+              description: Updated monitor type
+            config:
+              type: object
+              description: Updated configuration
+            notification_config:
+              type: object
+              description: Updated notification settings
+            is_active:
+              type: boolean
+              description: Active status
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                null:
+                  type: object
+                  example: null
+    security:
+      - Bearer: []
+    """
     try:
         user_id = g.user_id
         data = request.get_json() or {}
@@ -696,7 +1176,38 @@ def update_monitor(monitor_id):
 @portfolio_bp.route('/monitors/<int:monitor_id>', methods=['DELETE'])
 @login_required
 def delete_monitor(monitor_id):
-    """Delete a monitor for the current user."""
+    """Delete a monitor for the current user.
+
+    ---
+    tags:
+      - portfolio
+    parameters:
+      - in: path
+        name: monitor_id
+        type: integer
+        required: true
+        description: Monitor ID to delete
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                null:
+                  type: object
+                  example: null
+    security:
+      - Bearer: []
+    """
     try:
         user_id = g.user_id
         with get_db_connection() as db:
@@ -719,10 +1230,53 @@ def delete_monitor(monitor_id):
 @login_required
 def run_monitor_now(monitor_id):
     """Manually trigger a monitor to run immediately.
-    
-    Supports two modes:
-    - async=true (default): Returns immediately, runs in background, notifies via notification system
-    - async=false: Waits for completion and returns result (may timeout for large portfolios)
+
+    ---
+    tags:
+      - portfolio
+    parameters:
+      - in: path
+        name: monitor_id
+        type: integer
+        required: true
+        description: Monitor ID to run
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          properties:
+            language:
+              type: string
+              description: Response language (zh-CN, en-US)
+              example: en-US
+            async:
+              type: boolean
+              description: Run asynchronously (default: true)
+              example: true
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                status:
+                  type: string
+                  example: running
+                message:
+                  type: string
+                  example: Monitor is running in background
+    security:
+      - Bearer: []
     """
     try:
         from app.services.portfolio_monitor import run_single_monitor
@@ -783,7 +1337,81 @@ def run_monitor_now(monitor_id):
 @portfolio_bp.route('/alerts', methods=['GET'])
 @login_required
 def get_alerts():
-    """Get all position alerts for the current user."""
+    """Get all position alerts for the current user.
+
+    ---
+    tags:
+      - portfolio
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: array
+              items:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                    example: 1
+                  position_id:
+                    type: integer
+                    example: 5
+                  market:
+                    type: string
+                    example: binance
+                  symbol:
+                    type: string
+                    example: BTCUSDT
+                  alert_type:
+                    type: string
+                    example: price_above
+                  threshold:
+                    type: number
+                    example: 50000.0
+                  notification_config:
+                    type: object
+                  is_active:
+                    type: boolean
+                    example: true
+                  is_triggered:
+                    type: boolean
+                    example: false
+                  last_triggered_at:
+                    type: string
+                    format: date-time
+                  trigger_count:
+                    type: integer
+                    example: 0
+                  repeat_interval:
+                    type: integer
+                    example: 0
+                  notes:
+                    type: string
+                    example: BTC price alert
+                  created_at:
+                    type: string
+                    format: date-time
+                  updated_at:
+                    type: string
+                    format: date-time
+                  position_name:
+                    type: string
+                    example: Bitcoin
+                  position_side:
+                    type: string
+                    example: long
+    security:
+      - Bearer: []
+    """
     try:
         user_id = g.user_id
         with get_db_connection() as db:
@@ -836,7 +1464,82 @@ def get_alerts():
 @portfolio_bp.route('/alerts', methods=['POST'])
 @login_required
 def add_alert():
-    """Add a new position alert for the current user."""
+    """Add a new position alert for the current user.
+
+    ---
+    tags:
+      - portfolio
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - market
+            - symbol
+            - alert_type
+            - threshold
+          properties:
+            position_id:
+              type: integer
+              description: Position ID (optional, can use market+symbol)
+              example: 5
+            market:
+              type: string
+              description: Exchange market
+              example: binance
+            symbol:
+              type: string
+              description: Trading symbol
+              example: BTCUSDT
+            alert_type:
+              type: string
+              description: Alert type (price_above, price_below, pnl_above, pnl_below)
+              example: price_above
+            threshold:
+              type: number
+              description: Alert threshold value
+              example: 50000.0
+            notification_config:
+              type: object
+              description: Notification settings
+              properties:
+                enabled:
+                  type: boolean
+                  example: true
+            is_active:
+              type: boolean
+              example: true
+            repeat_interval:
+              type: integer
+              description: Repeat interval in minutes
+              example: 60
+            notes:
+              type: string
+              description: Alert notes
+              example: BTC price alert
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                id:
+                  type: integer
+                  example: 123
+    security:
+      - Bearer: []
+    """
     try:
         user_id = g.user_id
         data = request.get_json() or {}
@@ -931,7 +1634,62 @@ def add_alert():
 @portfolio_bp.route('/alerts/<int:alert_id>', methods=['PUT'])
 @login_required
 def update_alert(alert_id):
-    """Update an existing alert for the current user."""
+    """Update an existing alert for the current user.
+
+    ---
+    tags:
+      - portfolio
+    parameters:
+      - in: path
+        name: alert_id
+        type: integer
+        required: true
+        description: Alert ID to update
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          properties:
+            alert_type:
+              type: string
+              description: Updated alert type
+            threshold:
+              type: number
+              description: Updated threshold
+            notification_config:
+              type: object
+              description: Updated notification settings
+            is_active:
+              type: boolean
+              description: Active status
+            repeat_interval:
+              type: integer
+              description: Repeat interval in minutes
+            notes:
+              type: string
+              description: Updated notes
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                null:
+                  type: object
+                  example: null
+    security:
+      - Bearer: []
+    """
     try:
         user_id = g.user_id
         data = request.get_json() or {}
@@ -994,7 +1752,38 @@ def update_alert(alert_id):
 @portfolio_bp.route('/alerts/<int:alert_id>', methods=['DELETE'])
 @login_required
 def delete_alert(alert_id):
-    """Delete an alert for the current user."""
+    """Delete an alert for the current user.
+
+    ---
+    tags:
+      - portfolio
+    parameters:
+      - in: path
+        name: alert_id
+        type: integer
+        required: true
+        description: Alert ID to delete
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                null:
+                  type: object
+                  example: null
+    security:
+      - Bearer: []
+    """
     try:
         user_id = g.user_id
         with get_db_connection() as db:
@@ -1018,7 +1807,43 @@ def delete_alert(alert_id):
 @portfolio_bp.route('/groups', methods=['GET'])
 @login_required
 def get_groups():
-    """Get list of all groups with position counts for the current user."""
+    """Get list of all groups with position counts for the current user.
+
+    ---
+    tags:
+      - portfolio
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                groups:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                        example: tech_stocks
+                      count:
+                        type: integer
+                        example: 3
+                ungrouped_count:
+                  type: integer
+                  example: 2
+    security:
+      - Bearer: []
+    """
     try:
         user_id = g.user_id
         with get_db_connection() as db:
@@ -1070,7 +1895,50 @@ def get_groups():
 @portfolio_bp.route('/groups/rename', methods=['POST'])
 @login_required
 def rename_group():
-    """Rename a group for the current user."""
+    """Rename a group for the current user.
+
+    ---
+    tags:
+      - portfolio
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - old_name
+            - new_name
+          properties:
+            old_name:
+              type: string
+              description: Current group name
+              example: tech_stocks
+            new_name:
+              type: string
+              description: New group name
+              example: technology_stocks
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                null:
+                  type: object
+                  example: null
+    security:
+      - Bearer: []
+    """
     try:
         user_id = g.user_id
         data = request.get_json() or {}

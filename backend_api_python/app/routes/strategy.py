@@ -45,6 +45,30 @@ def get_backtest_service() -> BacktestService:
 def list_strategies():
     """
     List strategies for the current user.
+    ---
+    tags:
+      - strategies
+    responses:
+      200:
+        description: List of strategies
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                strategies:
+                  type: array
+                  items:
+                    type: object
+    security:
+      - Bearer: []
     """
     try:
         user_id = g.user_id
@@ -59,6 +83,39 @@ def list_strategies():
 @strategy_bp.route('/strategies/detail', methods=['GET'])
 @login_required
 def get_strategy_detail():
+    """
+    Get detailed information about a specific strategy.
+    ---
+    tags:
+      - strategies
+    parameters:
+      - in: query
+        name: id
+        type: integer
+        required: true
+        description: Strategy ID
+        example: 1
+    responses:
+      200:
+        description: Strategy details
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+      400:
+        description: Missing strategy id parameter
+      404:
+        description: Strategy not found
+    security:
+      - Bearer: []
+    """
     try:
         user_id = g.user_id
         strategy_id = request.args.get('id', type=int)
@@ -77,6 +134,60 @@ def get_strategy_detail():
 @strategy_bp.route('/strategies/backtest', methods=['POST'])
 @login_required
 def run_strategy_backtest():
+    """
+    Run backtest for a strategy.
+    ---
+    tags:
+      - strategies
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - strategyId
+            - startDate
+            - endDate
+          properties:
+            strategyId:
+              type: integer
+              description: Strategy ID
+              example: 1
+            startDate:
+              type: string
+              description: Start date (YYYY-MM-DD)
+              example: "2024-01-01"
+            endDate:
+              type: string
+              description: End date (YYYY-MM-DD)
+              example: "2024-12-31"
+            overrideConfig:
+              type: object
+              description: Optional config overrides
+    responses:
+      200:
+        description: Backtest result
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                runId:
+                  type: integer
+                  example: 42
+                result:
+                  type: object
+    security:
+      - Bearer: []
+    """
     try:
         payload = request.get_json() or {}
         user_id = g.user_id
@@ -191,6 +302,69 @@ def run_strategy_backtest():
 @strategy_bp.route('/strategies/backtest/history', methods=['GET'])
 @login_required
 def get_strategy_backtest_history():
+    """
+    Get backtest history for a strategy.
+    ---
+    tags:
+      - strategies
+    parameters:
+      - in: query
+        name: strategyId
+        type: integer
+        required: true
+        description: Strategy ID
+        example: 1
+      - in: query
+        name: limit
+        type: integer
+        required: false
+        default: 50
+        description: Max results (1-200)
+        example: 50
+      - in: query
+        name: offset
+        type: integer
+        required: false
+        default: 0
+        description: Offset for pagination
+        example: 0
+      - in: query
+        name: symbol
+        type: string
+        required: false
+        description: Filter by symbol
+        example: BTC/USDT
+      - in: query
+        name: market
+        type: string
+        required: false
+        description: Filter by market
+        example: Crypto
+      - in: query
+        name: timeframe
+        type: string
+        required: false
+        description: Filter by timeframe
+        example: 1h
+    responses:
+      200:
+        description: List of backtest runs
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: array
+              items:
+                type: object
+    security:
+      - Bearer: []
+    """
     try:
         user_id = g.user_id
         strategy_id = int(request.args.get('strategyId') or request.args.get('id') or 0)
@@ -221,6 +395,37 @@ def get_strategy_backtest_history():
 @strategy_bp.route('/strategies/backtest/get', methods=['GET'])
 @login_required
 def get_strategy_backtest_run():
+    """
+    Get a specific backtest run by ID.
+    ---
+    tags:
+      - strategies
+    parameters:
+      - in: query
+        name: runId
+        type: integer
+        required: true
+        description: Backtest run ID
+        example: 42
+    responses:
+      200:
+        description: Backtest run details
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+      404:
+        description: Run not found
+    security:
+      - Bearer: []
+    """
     try:
         user_id = g.user_id
         run_id = int(request.args.get('runId') or 0)
@@ -239,6 +444,51 @@ def get_strategy_backtest_run():
 @strategy_bp.route('/strategies/create', methods=['POST'])
 @login_required
 def create_strategy():
+    """
+    Create a new strategy.
+    ---
+    tags:
+      - strategies
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          properties:
+            strategy_name:
+              type: string
+              description: Strategy name
+              example: "My Strategy"
+            strategy_type:
+              type: string
+              description: Strategy type
+              example: "IndicatorStrategy"
+            initial_capital:
+              type: number
+              description: Initial capital
+              example: 10000
+    responses:
+      200:
+        description: Strategy created
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                id:
+                  type: integer
+                  example: 42
+    security:
+      - Bearer: []
+    """
     try:
         user_id = g.user_id
         payload = request.get_json() or {}
@@ -257,12 +507,50 @@ def create_strategy():
 @login_required
 def batch_create_strategies():
     """
-    Batch create strategies (multiple symbols)
-    
-    Request body:
-        strategy_name: Base strategy name
-        symbols: Array of symbols, e.g. ["Crypto:BTC/USDT", "Crypto:ETH/USDT"]
-        ... other strategy config
+    Batch create strategies for multiple symbols.
+    ---
+    tags:
+      - strategies
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - strategy_name
+            - symbols
+          properties:
+            strategy_name:
+              type: string
+              description: Base strategy name
+              example: "My Strategy"
+            symbols:
+              type: array
+              items:
+                type: string
+              description: Array of symbols
+              example: ["Crypto:BTC/USDT", "Crypto:ETH/USDT"]
+            strategy_type:
+              type: string
+              description: Strategy type
+              example: "IndicatorStrategy"
+    responses:
+      200:
+        description: Batch creation result
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: "Successfully created 5 strategies"
+            data:
+              type: object
+    security:
+      - Bearer: []
     """
     try:
         user_id = g.user_id
@@ -294,12 +582,43 @@ def batch_create_strategies():
 @login_required
 def batch_start_strategies():
     """
-    Batch start strategies
-    
-    Request body:
-        strategy_ids: Array of strategy IDs
-        or
-        strategy_group_id: Strategy group ID
+    Batch start multiple strategies.
+    ---
+    tags:
+      - strategies
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          properties:
+            strategy_ids:
+              type: array
+              items:
+                type: integer
+              description: Array of strategy IDs
+              example: [1, 2, 3]
+            strategy_group_id:
+              type: integer
+              description: Strategy group ID (alternative to strategy_ids)
+              example: 5
+    responses:
+      200:
+        description: Batch start result
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: "Successfully started 3 strategies"
+            data:
+              type: object
+    security:
+      - Bearer: []
     """
     try:
         user_id = g.user_id
@@ -340,12 +659,43 @@ def batch_start_strategies():
 @login_required
 def batch_stop_strategies():
     """
-    Batch stop strategies
-    
-    Request body:
-        strategy_ids: Array of strategy IDs
-        or
-        strategy_group_id: Strategy group ID
+    Batch stop multiple strategies.
+    ---
+    tags:
+      - strategies
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          properties:
+            strategy_ids:
+              type: array
+              items:
+                type: integer
+              description: Array of strategy IDs
+              example: [1, 2, 3]
+            strategy_group_id:
+              type: integer
+              description: Strategy group ID (alternative to strategy_ids)
+              example: 5
+    responses:
+      200:
+        description: Batch stop result
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: "Successfully stopped 3 strategies"
+            data:
+              type: object
+    security:
+      - Bearer: []
     """
     try:
         user_id = g.user_id
@@ -385,12 +735,43 @@ def batch_stop_strategies():
 @login_required
 def batch_delete_strategies():
     """
-    Batch delete strategies
-    
-    Request body:
-        strategy_ids: Array of strategy IDs
-        or
-        strategy_group_id: Strategy group ID
+    Batch delete multiple strategies.
+    ---
+    tags:
+      - strategies
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          properties:
+            strategy_ids:
+              type: array
+              items:
+                type: integer
+              description: Array of strategy IDs
+              example: [1, 2, 3]
+            strategy_group_id:
+              type: integer
+              description: Strategy group ID (alternative to strategy_ids)
+              example: 5
+    responses:
+      200:
+        description: Batch delete result
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: "Successfully deleted 3 strategies"
+            data:
+              type: object
+    security:
+      - Bearer: []
     """
     try:
         user_id = g.user_id
@@ -429,6 +810,53 @@ def batch_delete_strategies():
 @strategy_bp.route('/strategies/update', methods=['PUT'])
 @login_required
 def update_strategy():
+    """
+    Update an existing strategy.
+    ---
+    tags:
+      - strategies
+    parameters:
+      - in: query
+        name: id
+        type: integer
+        required: true
+        description: Strategy ID
+        example: 1
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          properties:
+            strategy_name:
+              type: string
+              description: Strategy name
+              example: "Updated Strategy"
+            initial_capital:
+              type: number
+              description: Initial capital
+              example: 15000
+    responses:
+      200:
+        description: Strategy updated
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+      400:
+        description: Missing strategy id parameter
+      404:
+        description: Strategy not found
+    security:
+      - Bearer: []
+    """
     try:
         user_id = g.user_id
         strategy_id = request.args.get('id', type=int)
@@ -448,6 +876,37 @@ def update_strategy():
 @strategy_bp.route('/strategies/delete', methods=['DELETE'])
 @login_required
 def delete_strategy():
+    """
+    Delete a strategy.
+    ---
+    tags:
+      - strategies
+    parameters:
+      - in: query
+        name: id
+        type: integer
+        required: true
+        description: Strategy ID
+        example: 1
+    responses:
+      200:
+        description: Delete result
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+      400:
+        description: Missing strategy id parameter
+    security:
+      - Bearer: []
+    """
     try:
         user_id = g.user_id
         strategy_id = request.args.get('id', type=int)
@@ -464,7 +923,48 @@ def delete_strategy():
 @strategy_bp.route('/strategies/trades', methods=['GET'])
 @login_required
 def get_trades():
-    """Get trade records for the current user's strategy."""
+    """
+    Get trade records for a strategy.
+    ---
+    tags:
+      - strategies
+    parameters:
+      - in: query
+        name: id
+        type: integer
+        required: true
+        description: Strategy ID
+        example: 1
+    responses:
+      200:
+        description: List of trades
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                trades:
+                  type: array
+                  items:
+                    type: object
+                items:
+                  type: array
+                  items:
+                    type: object
+      400:
+        description: Missing strategy id parameter
+      404:
+        description: Strategy not found
+    security:
+      - Bearer: []
+    """
     try:
         user_id = g.user_id
         strategy_id = request.args.get('id', type=int)
@@ -521,7 +1021,48 @@ def get_trades():
 @strategy_bp.route('/strategies/positions', methods=['GET'])
 @login_required
 def get_positions():
-    """Get position records for the current user's strategy."""
+    """
+    Get position records for a strategy.
+    ---
+    tags:
+      - strategies
+    parameters:
+      - in: query
+        name: id
+        type: integer
+        required: true
+        description: Strategy ID
+        example: 1
+    responses:
+      200:
+        description: List of positions
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                positions:
+                  type: array
+                  items:
+                    type: object
+                items:
+                  type: array
+                  items:
+                    type: object
+      400:
+        description: Missing strategy id parameter
+      404:
+        description: Strategy not found
+    security:
+      - Bearer: []
+    """
     try:
         user_id = g.user_id
         strategy_id = request.args.get('id', type=int)
@@ -635,7 +1176,48 @@ def get_positions():
 @strategy_bp.route('/strategies/equityCurve', methods=['GET'])
 @login_required
 def get_equity_curve():
-    """Get equity curve for the current user's strategy."""
+    """
+    Get equity curve for a strategy.
+    ---
+    tags:
+      - strategies
+    parameters:
+      - in: query
+        name: id
+        type: integer
+        required: true
+        description: Strategy ID
+        example: 1
+    responses:
+      200:
+        description: Equity curve data
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: array
+              items:
+                type: object
+                properties:
+                  time:
+                    type: integer
+                    example: 1704067200
+                  equity:
+                    type: number
+                    example: 10500.0
+      400:
+        description: Missing strategy id parameter
+      404:
+        description: Strategy not found
+    security:
+      - Bearer: []
+    """
     try:
         user_id = g.user_id
         strategy_id = request.args.get('id', type=int)
@@ -693,10 +1275,37 @@ def get_equity_curve():
 @login_required
 def stop_strategy():
     """
-    Stop a strategy for the current user.
-    
-    Params:
-        id: Strategy ID
+    Stop a running strategy.
+    ---
+    tags:
+      - strategies
+    parameters:
+      - in: query
+        name: id
+        type: integer
+        required: true
+        description: Strategy ID
+        example: 1
+    responses:
+      200:
+        description: Stop result
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: "Stopped successfully"
+            data:
+              type: object
+      400:
+        description: Missing strategy id parameter or AI strategy not supported
+      404:
+        description: Strategy not found
+    security:
+      - Bearer: []
     """
     try:
         user_id = g.user_id
@@ -747,10 +1356,39 @@ def stop_strategy():
 @login_required
 def start_strategy():
     """
-    Start a strategy for the current user.
-    
-    Params:
-        id: Strategy ID
+    Start a strategy.
+    ---
+    tags:
+      - strategies
+    parameters:
+      - in: query
+        name: id
+        type: integer
+        required: true
+        description: Strategy ID
+        example: 1
+    responses:
+      200:
+        description: Start result
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: "Started successfully"
+            data:
+              type: object
+      400:
+        description: Missing strategy id parameter or AI strategy not supported
+      404:
+        description: Strategy not found
+      500:
+        description: Failed to start strategy executor
+    security:
+      - Bearer: []
     """
     try:
         user_id = g.user_id
@@ -811,9 +1449,35 @@ def start_strategy():
 def test_connection():
     """
     Test exchange connection.
-    
-    Request body:
-        exchange_config: Exchange configuration (may contain credential_id or inline keys)
+    ---
+    tags:
+      - strategies
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          properties:
+            exchange_config:
+              type: object
+              description: Exchange configuration (may contain credential_id or inline keys)
+    responses:
+      200:
+        description: Connection test result
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: "Connection successful"
+            data:
+              type: object
+    security:
+      - Bearer: []
     """
     try:
         data = request.get_json() or {}
@@ -890,9 +1554,40 @@ def test_connection():
 def get_symbols():
     """
     Get exchange trading pairs list.
-    
-    Request body:
-        exchange_config: Exchange configuration
+    ---
+    tags:
+      - strategies
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          properties:
+            exchange_config:
+              type: object
+              description: Exchange configuration
+    responses:
+      200:
+        description: List of trading symbols
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                symbols:
+                  type: array
+                  items:
+                    type: string
+    security:
+      - Bearer: []
     """
     try:
         data = request.get_json() or {}
@@ -934,6 +1629,39 @@ def get_symbols():
 def preview_compile():
     """
     Preview compiled strategy result.
+    ---
+    tags:
+      - strategies
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - config
+          properties:
+            config:
+              type: object
+              description: Strategy configuration
+    responses:
+      200:
+        description: Compilation and execution result
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: Success
+            data:
+              type: object
+      400:
+        description: Missing config or compilation failed
+    security:
+      - Bearer: []
     """
     try:
         data = request.get_json() or {}
@@ -980,12 +1708,51 @@ def preview_compile():
 @login_required
 def get_strategy_notifications():
     """
-    Strategy signal notifications for the current user.
-
-    Query:
-      - id: strategy id (optional)
-      - limit: default 50, max 200
-      - since_id: return rows with id > since_id (optional)
+    Get strategy signal notifications for the current user.
+    ---
+    tags:
+      - strategies
+    parameters:
+      - in: query
+        name: id
+        type: integer
+        required: false
+        description: Strategy ID filter
+        example: 1
+      - in: query
+        name: limit
+        type: integer
+        required: false
+        default: 50
+        description: Max results (1-200)
+        example: 50
+      - in: query
+        name: since_id
+        type: integer
+        required: false
+        description: Return rows with id > since_id
+        example: 100
+    responses:
+      200:
+        description: List of notifications
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                items:
+                  type: array
+                  items:
+                    type: object
+    security:
+      - Bearer: []
     """
     try:
         user_id = g.user_id
@@ -1077,7 +1844,29 @@ def get_strategy_notifications():
 def get_unread_notification_count():
     """
     Get unread notification count for the current user.
-    Used by frontend header badge (cap at 99+ on UI).
+    ---
+    tags:
+      - strategies
+    responses:
+      200:
+        description: Unread count
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                unread:
+                  type: integer
+                  example: 5
+    security:
+      - Bearer: []
     """
     try:
         user_id = g.user_id
@@ -1122,7 +1911,41 @@ def get_unread_notification_count():
 @strategy_bp.route('/strategies/notifications/read', methods=['POST'])
 @login_required
 def mark_notification_read():
-    """Mark a single notification as read for the current user."""
+    """
+    Mark a single notification as read.
+    ---
+    tags:
+      - strategies
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - id
+          properties:
+            id:
+              type: integer
+              description: Notification ID
+              example: 42
+    responses:
+      200:
+        description: Marked as read
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+      400:
+        description: Missing id
+    security:
+      - Bearer: []
+    """
     try:
         user_id = g.user_id
         data = request.get_json(force=True, silent=True) or {}
@@ -1155,7 +1978,26 @@ def mark_notification_read():
 @strategy_bp.route('/strategies/notifications/read-all', methods=['POST'])
 @login_required
 def mark_all_notifications_read():
-    """Mark all notifications as read for the current user."""
+    """
+    Mark all notifications as read.
+    ---
+    tags:
+      - strategies
+    responses:
+      200:
+        description: All marked as read
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+    security:
+      - Bearer: []
+    """
     try:
         user_id = g.user_id
         with get_db_connection() as db:
@@ -1180,7 +2022,26 @@ def mark_all_notifications_read():
 @strategy_bp.route('/strategies/notifications/clear', methods=['DELETE'])
 @login_required
 def clear_notifications():
-    """Clear all notifications for the current user."""
+    """
+    Clear all notifications for the current user.
+    ---
+    tags:
+      - strategies
+    responses:
+      200:
+        description: All notifications cleared
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+    security:
+      - Bearer: []
+    """
     try:
         user_id = g.user_id
         with get_db_connection() as db:
@@ -1207,7 +2068,39 @@ def clear_notifications():
 @strategy_bp.route('/strategies/verify-code', methods=['POST'])
 @login_required
 def verify_strategy_code():
-    """Verify script strategy code syntax and safety."""
+    """
+    Verify script strategy code syntax and safety.
+    ---
+    tags:
+      - strategies
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - code
+          properties:
+            code:
+              type: string
+              description: Strategy code to verify
+              example: "def on_init(ctx):\n    pass\ndef on_bar(ctx, bar):\n    pass"
+    responses:
+      200:
+        description: Verification result
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: true
+            message:
+              type: string
+              example: "Code verification passed"
+    security:
+      - Bearer: []
+    """
     try:
         payload = request.get_json() or {}
         code = payload.get('code', '')
@@ -1241,7 +2134,39 @@ def verify_strategy_code():
 @strategy_bp.route('/strategies/ai-generate', methods=['POST'])
 @login_required
 def ai_generate_strategy():
-    """Generate strategy code using AI."""
+    """
+    Generate strategy code using AI.
+    ---
+    tags:
+      - strategies
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - prompt
+          properties:
+            prompt:
+              type: string
+              description: Description of the strategy to generate
+              example: "A simple moving average crossover strategy"
+    responses:
+      200:
+        description: Generated strategy code
+        schema:
+          type: object
+          properties:
+            code:
+              type: string
+              description: Generated Python code
+            msg:
+              type: string
+              example: success
+    security:
+      - Bearer: []
+    """
     try:
         payload = request.get_json() or {}
         prompt = payload.get('prompt', '')
@@ -1301,7 +2226,40 @@ Return ONLY the Python code, no explanations."""
 @strategy_bp.route('/strategies/performance', methods=['GET'])
 @login_required
 def get_strategy_performance():
-    """Get strategy performance metrics (aggregated from equity curve and trades)."""
+    """
+    Get strategy performance metrics.
+    ---
+    tags:
+      - strategies
+    parameters:
+      - in: query
+        name: id
+        type: integer
+        required: true
+        description: Strategy ID
+        example: 1
+    responses:
+      200:
+        description: Performance metrics
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                equity_curve:
+                  type: array
+                  items:
+                    type: object
+    security:
+      - Bearer: []
+    """
     try:
         strategy_id = request.args.get('id')
         if not strategy_id:
@@ -1324,7 +2282,57 @@ def get_strategy_performance():
 @strategy_bp.route('/strategies/logs', methods=['GET'])
 @login_required
 def get_strategy_logs():
-    """Get strategy running logs."""
+    """
+    Get strategy running logs.
+    ---
+    tags:
+      - strategies
+    parameters:
+      - in: query
+        name: id
+        type: integer
+        required: true
+        description: Strategy ID
+        example: 1
+      - in: query
+        name: limit
+        type: integer
+        required: false
+        default: 200
+        description: Max logs to return
+        example: 200
+    responses:
+      200:
+        description: List of log entries
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: array
+              items:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  strategy_id:
+                    type: integer
+                  level:
+                    type: string
+                  message:
+                    type: string
+                  timestamp:
+                    type: string
+      400:
+        description: Strategy ID required
+    security:
+      - Bearer: []
+    """
     try:
         strategy_id = request.args.get('id')
         limit = int(request.args.get('limit', 200))

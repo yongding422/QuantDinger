@@ -21,7 +21,36 @@ billing_bp = Blueprint("billing", __name__)
 @billing_bp.route("/plans", methods=["GET"])
 @login_required
 def get_membership_plans():
-    """Get membership plan configuration + current user's billing snapshot."""
+    """
+    Get membership plan configuration and current user's billing snapshot.
+
+    ---
+    tags:
+      - billing
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                plans:
+                  type: array
+                  items:
+                    type: object
+                billing:
+                  type: object
+    security:
+      - Bearer: []
+    """
     try:
         user_id = getattr(g, "user_id", None)
         svc = get_billing_service()
@@ -39,8 +68,39 @@ def purchase_membership():
     """
     Purchase membership (mock: immediate activation).
 
-    Body:
-      { plan: "monthly" | "yearly" | "lifetime" }
+    ---
+    tags:
+      - billing
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - plan
+          properties:
+            plan:
+              type: string
+              description: Membership plan type
+              enum: [monthly, yearly, lifetime]
+              example: monthly
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+    security:
+      - Bearer: []
     """
     try:
         user_id = getattr(g, "user_id", None)
@@ -69,8 +129,39 @@ def usdt_create_order():
     """
     Create USDT order for membership plan (per-order address).
 
-    Body:
-      { plan: "monthly"|"yearly"|"lifetime" }
+    ---
+    tags:
+      - billing
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - plan
+          properties:
+            plan:
+              type: string
+              description: Membership plan type
+              enum: [monthly, yearly, lifetime]
+              example: monthly
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+    security:
+      - Bearer: []
     """
     try:
         user_id = getattr(g, "user_id", None)
@@ -91,7 +182,43 @@ def usdt_create_order():
 @billing_bp.route("/usdt/order/<int:order_id>", methods=["GET"])
 @login_required
 def usdt_get_order(order_id: int):
-    """Get my USDT order; refresh chain status by default."""
+    """
+    Get my USDT order; refresh chain status by default.
+
+    ---
+    tags:
+      - billing
+    parameters:
+      - in: path
+        name: order_id
+        required: true
+        type: integer
+        description: Order ID
+        example: 123
+      - in: query
+        name: refresh
+        required: false
+        type: string
+        description: Refresh chain status (1/true/yes to refresh)
+        default: "1"
+        example: "1"
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+    security:
+      - Bearer: []
+    """
     try:
         user_id = getattr(g, "user_id", None)
         refresh = str(request.args.get("refresh", "1")).lower() in ("1", "true", "yes")

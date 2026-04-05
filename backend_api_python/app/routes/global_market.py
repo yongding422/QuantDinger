@@ -1425,7 +1425,39 @@ def _generate_heatmap_data() -> Dict[str, Any]:
 def market_overview():
     """
     Get global market overview including indices, forex, crypto, and commodities.
-    Includes geo coordinates for world map display.
+
+    ---
+    tags:
+      - global-market
+    security:
+      - Bearer: []
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                indices:
+                  type: array
+                  items:
+                    type: object
+                forex:
+                  type: array
+                crypto:
+                  type: array
+                commodities:
+                  type: array
+                timestamp:
+                  type: integer
     """
     try:
         # Check cache first
@@ -1492,6 +1524,37 @@ def market_overview():
 def market_heatmap():
     """
     Get market heatmap data for crypto, stock sectors, forex, and indices.
+
+    ---
+    tags:
+      - global-market
+    security:
+      - Bearer: []
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                crypto:
+                  type: array
+                sectors:
+                  type: array
+                forex:
+                  type: array
+                commodities:
+                  type: array
+                indices:
+                  type: array
     """
     try:
         cached = _get_cached("market_heatmap", 30)
@@ -1513,8 +1576,40 @@ def market_heatmap():
 def market_news():
     """
     Get financial news from various sources.
-    Query params:
-        - lang: 'cn', 'en', or 'all' (default: 'all')
+
+    ---
+    tags:
+      - global-market
+    security:
+      - Bearer: []
+    parameters:
+      - in: query
+        name: lang
+        required: false
+        type: string
+        description: Language filter (cn, en, or all)
+        default: all
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                cn:
+                  type: array
+                  items:
+                    type: object
+                en:
+                  type: array
     """
     try:
         lang = request.args.get("lang", "all")
@@ -1539,6 +1634,49 @@ def market_news():
 def economic_calendar():
     """
     Get economic calendar events with impact indicators.
+
+    ---
+    tags:
+      - global-market
+    security:
+      - Bearer: []
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: array
+              items:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  name:
+                    type: string
+                  name_en:
+                    type: string
+                  country:
+                    type: string
+                  date:
+                    type: string
+                  time:
+                    type: string
+                  importance:
+                    type: string
+                  actual:
+                    type: string
+                  forecast:
+                    type: string
+                  previous:
+                    type: string
     """
     try:
         cached = _get_cached("economic_calendar", 3600)  # 1 hour cache
@@ -1560,7 +1698,43 @@ def economic_calendar():
 def market_sentiment():
     """
     Get comprehensive market sentiment indicators.
-    Includes: Fear & Greed, VIX, DXY, Yield Curve, VXN, GVZ, VIX Term Structure.
+
+    ---
+    tags:
+      - global-market
+    security:
+      - Bearer: []
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                fear_greed:
+                  type: object
+                vix:
+                  type: object
+                dxy:
+                  type: object
+                yield_curve:
+                  type: object
+                vxn:
+                  type: object
+                gvz:
+                  type: object
+                vix_term:
+                  type: object
+                timestamp:
+                  type: integer
     """
     try:
         # 缓存6小时 (21600秒)，宏观数据变化缓慢，减少 API 调用
@@ -1916,8 +2090,54 @@ def _analyze_opportunities_polymarket(opportunities: list):
 def trading_opportunities():
     """
     Scan for trading opportunities across Crypto, US Stocks, and Forex.
-    Note: Prediction Markets are excluded as they have their own dedicated page.
-    Cached for 1 hour. Pass ?force=true to skip cache.
+
+    ---
+    tags:
+      - global-market
+    security:
+      - Bearer: []
+    parameters:
+      - in: query
+        name: force
+        required: false
+        type: string
+        description: Force refresh (true/false)
+        default: false
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: array
+              items:
+                type: object
+                properties:
+                  symbol:
+                    type: string
+                  name:
+                    type: string
+                  price:
+                    type: number
+                  change_24h:
+                    type: number
+                  signal:
+                    type: string
+                  strength:
+                    type: string
+                  reason:
+                    type: string
+                  impact:
+                    type: string
+                  market:
+                    type: string
     """
     try:
         force = request.args.get("force", "").lower() in ("true", "1")
@@ -1975,6 +2195,26 @@ def trading_opportunities():
 def refresh_data():
     """
     Force refresh all market data (clears cache).
+
+    ---
+    tags:
+      - global-market
+    security:
+      - Bearer: []
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: Cache cleared successfully
+            data:
+              type: null
     """
     try:
         global _cache
