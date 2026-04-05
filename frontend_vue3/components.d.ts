@@ -12,6 +12,7 @@ export {}
 declare module 'vue' {
   export interface GlobalComponents {
     AAvatar: typeof import('ant-design-vue/es')['Avatar']
+    ABadge: typeof import('ant-design-vue/es')['Badge']
     AButton: typeof import('ant-design-vue/es')['Button']
     ACard: typeof import('ant-design-vue/es')['Card']
     ACol: typeof import('ant-design-vue/es')['Col']
@@ -21,6 +22,7 @@ declare module 'vue' {
     AForm: typeof import('ant-design-vue/es')['Form']
     AFormItem: typeof import('ant-design-vue/es')['FormItem']
     AInput: typeof import('ant-design-vue/es')['Input']
+    AInputNumber: typeof import('ant-design-vue/es')['InputNumber']
     AInputPassword: typeof import('ant-design-vue/es')['InputPassword']
     AInputSearch: typeof import('ant-design-vue/es')['InputSearch']
     ALayout: typeof import('ant-design-vue/es')['Layout']
@@ -31,6 +33,8 @@ declare module 'vue' {
     AMenu: typeof import('ant-design-vue/es')['Menu']
     AMenuDivider: typeof import('ant-design-vue/es')['MenuDivider']
     AMenuItem: typeof import('ant-design-vue/es')['MenuItem']
+    AModal: typeof import('ant-design-vue/es')['Modal']
+    APopconfirm: typeof import('ant-design-vue/es')['Popconfirm']
     AppFooter: typeof import('./src/components/layout/AppFooter.vue')['default']
     AppHeader: typeof import('./src/components/layout/AppHeader.vue')['default']
     AppLayout: typeof import('./src/components/layout/AppLayout.vue')['default']
@@ -41,6 +45,7 @@ declare module 'vue' {
     ASelectOption: typeof import('ant-design-vue/es')['SelectOption']
     AStatistic: typeof import('ant-design-vue/es')['Statistic']
     ASubMenu: typeof import('ant-design-vue/es')['SubMenu']
+    ASwitch: typeof import('ant-design-vue/es')['Switch']
     ATable: typeof import('ant-design-vue/es')['Table']
     ATabPane: typeof import('ant-design-vue/es')['TabPane']
     ATabs: typeof import('ant-design-vue/es')['Tabs']
