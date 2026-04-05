@@ -23,20 +23,92 @@ polymarket_source = PolymarketDataSource()
 @login_required
 def analyze_polymarket():
     """
-    分析Polymarket预测市场（用户输入链接或标题）
-    
-    POST /api/polymarket/analyze
-    Body: {
-        "input": "https://polymarket.com/event/xxx" 或 "市场标题",
-        "language": "zh-CN" (optional)
-    }
-    
-    流程：
-    1. 从输入中解析market_id或slug
-    2. 从API获取市场数据
-    3. 检查计费并扣除积分
-    4. 调用AI分析
-    5. 返回分析结果
+    Analyze a Polymarket prediction market by URL or title.
+    ---
+    tags:
+      - polymarket
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - input
+          properties:
+            input:
+              type: string
+              description: Polymarket URL or market title
+              example: https://polymarket.com/event/xxx
+            language:
+              type: string
+              description: Response language
+              example: zh-CN
+            model:
+              type: string
+              description: AI model to use (optional)
+              example: gpt-4
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                market:
+                  type: object
+                analysis:
+                  type: object
+                credits_charged:
+                  type: number
+                  example: 0
+                remaining_credits:
+                  type: number
+                  example: 100
+      400:
+        description: Invalid input or insufficient credits
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 0
+            msg:
+              type: string
+              example: Input is required
+            data:
+              type: object
+              properties:
+                required:
+                  type: number
+                  example: 5
+                current:
+                  type: number
+                  example: 2
+                shortage:
+                  type: number
+                  example: 3
+      401:
+        description: Not authenticated
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 0
+            msg:
+              type: string
+              example: User not authenticated
+    security:
+      - Bearer: []
     """
     try:
         from app.services.billing_service import BillingService
@@ -233,8 +305,55 @@ def analyze_polymarket():
 def get_polymarket_history():
     """
     Get user's Polymarket analysis history.
-    
-    GET /api/polymarket/history?page=1&page_size=20
+    ---
+    tags:
+      - polymarket
+    parameters:
+      - in: query
+        name: page
+        type: integer
+        required: false
+        description: Page number
+        example: 1
+      - in: query
+        name: page_size
+        type: integer
+        required: false
+        description: Items per page (max 100)
+        example: 20
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                items:
+                  type: array
+                  items:
+                    type: object
+                total:
+                  type: integer
+                  example: 50
+                page:
+                  type: integer
+                  example: 1
+                page_size:
+                  type: integer
+                  example: 20
+                total_pages:
+                  type: integer
+                  example: 3
+    security:
+      - Bearer: []
     """
     try:
         user_id = g.user_id

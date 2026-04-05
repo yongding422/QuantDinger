@@ -15,8 +15,59 @@ ai_chat_bp = Blueprint('ai_chat', __name__)
 @ai_chat_bp.route('/chat/message', methods=['POST'])
 def chat_message():
     """
-    Minimal placeholder for legacy chat.
-    Return a friendly message instead of 404, so the UI can evolve gradually.
+    Send a chat message (legacy compatibility stub).
+
+    ---
+    tags:
+      - ai-chat
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - message
+          properties:
+            message:
+              type: string
+              description: The message content to send
+              example: What is the trend for BTC?
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                reply:
+                  type: string
+                  example: Chat API is not implemented yet in local-only mode.
+                echo:
+                  type: string
+                  example: What is the trend for BTC?
+      400:
+        description: Missing message
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 0
+            msg:
+              type: string
+              example: Missing message
+            data:
+              type: string
+              example: null
     """
     data = request.get_json() or {}
     msg = (data.get('message') or '').strip()
@@ -34,13 +85,64 @@ def chat_message():
 
 @ai_chat_bp.route('/chat/history', methods=['GET'])
 def get_chat_history():
-    """Return empty history (compatibility stub)."""
+    """
+    Get chat history (legacy compatibility stub).
+
+    ---
+    tags:
+      - ai-chat
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: array
+              items:
+                type: object
+              example: []
+    """
     return jsonify({'code': 1, 'msg': 'success', 'data': []})
 
 
 @ai_chat_bp.route('/chat/history/save', methods=['POST'])
 def save_chat_history():
-    """No-op save (compatibility stub)."""
+    """
+    Save chat history (legacy compatibility stub).
+
+    ---
+    tags:
+      - ai-chat
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          properties: {}
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: string
+              example: null
+    """
     return jsonify({'code': 1, 'msg': 'success', 'data': None})
 
 

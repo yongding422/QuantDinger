@@ -902,7 +902,30 @@ def write_env_file(env_values):
 @login_required
 @admin_required
 def get_settings_schema():
-    """获取配置项定义 (admin only)"""
+    """
+    Get settings configuration schema.
+
+    ---
+    tags:
+      - settings
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              description: Configuration schema grouped by category
+    security:
+      - Bearer: []
+    """
     return jsonify({
         'code': 1,
         'msg': 'success',
@@ -914,7 +937,30 @@ def get_settings_schema():
 @login_required
 @admin_required
 def get_settings_values():
-    """获取当前配置值 - 包括敏感信息（真实值）(admin only)"""
+    """
+    Get current configuration values including sensitive data.
+
+    ---
+    tags:
+      - settings
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              description: Current configuration values by group
+    security:
+      - Bearer: []
+    """
     env_values = read_env_file()
     
     # 构建返回数据，返回真实值
@@ -940,7 +986,51 @@ def get_settings_values():
 @login_required
 @admin_required
 def save_settings():
-    """保存配置 (admin only)"""
+    """
+    Save configuration settings.
+
+    ---
+    tags:
+      - settings
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          description: Configuration values grouped by category
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: Settings saved successfully
+            data:
+              type: object
+              properties:
+                updated_keys:
+                  type: array
+                  items:
+                    type: string
+                  example: ["LLM_PROVIDER", "OPENAI_API_KEY"]
+                requires_restart:
+                  type: boolean
+                  example: false
+                hot_reloaded:
+                  type: boolean
+                  example: true
+                services_refreshed:
+                  type: boolean
+                  example: true
+    security:
+      - Bearer: []
+    """
     try:
         data = request.get_json()
         if not data:
@@ -1001,7 +1091,58 @@ def save_settings():
 @login_required
 @admin_required
 def get_openrouter_balance():
-    """查询 OpenRouter 账户余额 (admin only)"""
+    """
+    Get OpenRouter account balance and usage info.
+
+    ---
+    tags:
+      - settings
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                usage:
+                  type: number
+                  example: 0.0
+                limit:
+                  type: number
+                  example: null
+                limit_remaining:
+                  type: number
+                  example: 5.0
+                is_free_tier:
+                  type: boolean
+                  example: false
+                rate_limit:
+                  type: object
+                label:
+                  type: string
+                  example: "key-label"
+      0:
+        description: API Key not configured or invalid
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 0
+            msg:
+              type: string
+              example: OpenRouter API Key 未配置
+    security:
+      - Bearer: []
+    """
     try:
         import requests
         from app.config.api_keys import APIKeys
@@ -1079,7 +1220,47 @@ def get_openrouter_balance():
 @login_required
 @admin_required
 def test_connection():
-    """测试API连接 (admin only)"""
+    """
+    Test API connection for a given service.
+
+    ---
+    tags:
+      - settings
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - service
+          properties:
+            service:
+              type: string
+              enum:
+                - openrouter
+                - finnhub
+              description: Service name to test
+              example: openrouter
+            api_key:
+              type: string
+              description: Optional API key override (for finnhub)
+              example: ""
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: OpenRouter connection successful
+    security:
+      - Bearer: []
+    """
     try:
         data = request.get_json()
         service = data.get('service')

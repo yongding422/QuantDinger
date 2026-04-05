@@ -17,14 +17,72 @@ kline_service = KlineService()
 @kline_bp.route('/kline', methods=['GET'])
 def get_kline():
     """
-    获取K线数据
-    
-    参数:
-        market: 市场类型 (Crypto, USStock, Forex, Futures)
-        symbol: 交易对/股票代码
-        timeframe: 时间周期 (1m, 5m, 15m, 30m, 1H, 4H, 1D, 1W)
-        limit: 数据条数 (默认300)
-        before_time: 获取此时间之前的数据 (可选，Unix时间戳)
+    Get K-line (candlestick) data.
+
+    ---
+    tags:
+      - indicator
+    parameters:
+      - in: query
+        name: market
+        required: false
+        type: string
+        description: Market type (Crypto, USStock, Forex, Futures)
+        default: USStock
+      - in: query
+        name: symbol
+        required: true
+        type: string
+        description: Symbol/ticker
+        example: AAPL
+      - in: query
+        name: timeframe
+        required: false
+        type: string
+        description: Timeframe (1m, 5m, 15m, 30m, 1H, 4H, 1D, 1W)
+        default: 1D
+      - in: query
+        name: limit
+        required: false
+        type: integer
+        description: Number of data points
+        default: 300
+      - in: query
+        name: before_time
+        required: false
+        type: integer
+        description: Get data before this Unix timestamp
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: array
+              items:
+                type: object
+                properties:
+                  timestamp:
+                    type: integer
+                  open:
+                    type: number
+                  high:
+                    type: number
+                  low:
+                    type: number
+                  close:
+                    type: number
+                  volume:
+                    type: number
+      400:
+        description: Missing symbol parameter
     """
     try:
         # 强制 GET, 使用 request.args
@@ -86,7 +144,49 @@ def get_kline():
 
 @kline_bp.route('/price', methods=['GET'])
 def get_price():
-    """获取最新价格"""
+    """
+    Get latest price for a symbol.
+
+    ---
+    tags:
+      - indicator
+    parameters:
+      - in: query
+        name: market
+        required: false
+        type: string
+        description: Market type
+        default: USStock
+      - in: query
+        name: symbol
+        required: true
+        type: string
+        description: Symbol/ticker
+        example: AAPL
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                price:
+                  type: number
+                change:
+                  type: number
+                changePercent:
+                  type: number
+      400:
+        description: Missing symbol parameter
+    """
     try:
         market = request.args.get('market', 'USStock')
         symbol = request.args.get('symbol', '')

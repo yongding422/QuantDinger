@@ -298,6 +298,78 @@ def _compute_strategy_stats(trades: List[Dict[str, Any]], strategies: List[Dict[
 def summary():
     """
     Return dashboard summary used by `quantdinger_vue/src/views/dashboard/index.vue`.
+    ---
+    tags:
+      - dashboard
+    responses:
+      200:
+        description: Dashboard summary data
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                ai_strategy_count:
+                  type: integer
+                  example: 2
+                indicator_strategy_count:
+                  type: integer
+                  example: 5
+                total_equity:
+                  type: number
+                  example: 12500.0
+                total_pnl:
+                  type: number
+                  example: 2500.0
+                total_realized_pnl:
+                  type: number
+                  example: 2000.0
+                total_unrealized_pnl:
+                  type: number
+                  example: 500.0
+                performance:
+                  type: object
+                strategy_stats:
+                  type: array
+                  items:
+                    type: object
+                daily_pnl_chart:
+                  type: array
+                  items:
+                    type: object
+                strategy_pnl_chart:
+                  type: array
+                  items:
+                    type: object
+                monthly_returns:
+                  type: array
+                  items:
+                    type: object
+                hourly_distribution:
+                  type: array
+                  items:
+                    type: object
+                calendar_months:
+                  type: array
+                  items:
+                    type: object
+                recent_trades:
+                  type: array
+                  items:
+                    type: object
+                current_positions:
+                  type: array
+                  items:
+                    type: object
+    security:
+      - Bearer: []
     """
     try:
         user_id = g.user_id
@@ -566,6 +638,54 @@ def summary():
 def pending_orders():
     """
     Return pending orders list for dashboard page.
+    ---
+    tags:
+      - dashboard
+    parameters:
+      - in: query
+        name: page
+        type: integer
+        required: false
+        default: 1
+        description: Page number
+        example: 1
+      - in: query
+        name: pageSize
+        type: integer
+        required: false
+        default: 20
+        description: Number of items per page (max 200)
+        example: 20
+    responses:
+      200:
+        description: Paginated list of pending orders
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                list:
+                  type: array
+                  items:
+                    type: object
+                page:
+                  type: integer
+                  example: 1
+                pageSize:
+                  type: integer
+                  example: 20
+                total:
+                  type: integer
+                  example: 100
+    security:
+      - Bearer: []
     """
     try:
         user_id = g.user_id
@@ -685,6 +805,40 @@ def pending_orders():
 def delete_pending_order(order_id: int):
     """
     Delete a pending order record (dashboard operation).
+    ---
+    tags:
+      - dashboard
+    parameters:
+      - in: path
+        name: order_id
+        type: integer
+        required: true
+        description: Pending order ID
+        example: 42
+    responses:
+      200:
+        description: Order deleted successfully
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                id:
+                  type: integer
+                  example: 42
+      400:
+        description: Invalid ID or cannot delete processing order
+      404:
+        description: Order not found
+    security:
+      - Bearer: []
     """
     try:
         user_id = g.user_id

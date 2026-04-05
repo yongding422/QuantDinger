@@ -32,7 +32,59 @@ def _api_key_hint(api_key: str) -> str:
 @credentials_bp.route('/list', methods=['GET'])
 @login_required
 def list_credentials():
-    """List all credentials for the current user."""
+    """
+    List all credentials for the current user.
+
+    ---
+    tags:
+      - credentials
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                items:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      id:
+                        type: integer
+                        example: 1
+                      user_id:
+                        type: integer
+                        example: 1
+                      name:
+                        type: string
+                        example: My Binance Key
+                      exchange_id:
+                        type: string
+                        example: binance
+                      api_key_hint:
+                        type: string
+                        example: abcd***efgh
+                      enable_demo_trading:
+                        type: boolean
+                        example: false
+                      created_at:
+                        type: string
+                        example: "2024-01-01 00:00:00"
+                      updated_at:
+                        type: string
+                        example: "2024-01-01 00:00:00"
+    security:
+      - Bearer: []
+    """
     try:
         user_id = g.user_id
 
@@ -93,8 +145,37 @@ def _egress_ipify(url: str) -> str:
 @login_required
 def get_egress_ip():
     """
-    Public egress IPv4/IPv6 of this API server (for exchange API key IP whitelist).
-    Uses ipify's v4-only / v6-only endpoints so each family is detected independently.
+    Get public egress IPv4/IPv6 of this API server for exchange API key IP whitelisting.
+
+    ---
+    tags:
+      - credentials
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                ipv4:
+                  type: string
+                  example: "203.0.113.42"
+                ipv6:
+                  type: string
+                  example: null
+                ip:
+                  type: string
+                  example: "203.0.113.42"
+    security:
+      - Bearer: []
     """
     ipv4 = _egress_ipify("https://api4.ipify.org?format=json")
     ipv6 = _egress_ipify("https://api6.ipify.org?format=json")
@@ -115,9 +196,108 @@ def get_egress_ip():
 @credentials_bp.route('/create', methods=['POST'])
 @login_required
 def create_credential():
-    """Create a new credential for the current user.
+    """
+    Create a new exchange credential for the current user.
 
-    Supports crypto exchanges, IBKR (US stocks) and MT5 (Forex).
+    ---
+    tags:
+      - credentials
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - exchange_id
+          properties:
+            name:
+              type: string
+              description: Display name for this credential
+              example: My Binance Key
+            exchange_id:
+              type: string
+              description: Exchange identifier (binance, okx, bitget, bybit, coinbaseexchange, kraken, kucoin, gate, bitfinex, deepcoin, htx, ibkr, mt5)
+              example: binance
+            api_key:
+              type: string
+              description: Exchange API key (for crypto exchanges)
+              example: ""
+            secret_key:
+              type: string
+              description: Exchange secret key (for crypto exchanges)
+              example: ""
+            passphrase:
+              type: string
+              description: Optional passphrase (for some exchanges)
+              example: ""
+            enable_demo_trading:
+              type: boolean
+              description: Enable demo trading mode
+              example: false
+            ibkr_host:
+              type: string
+              description: IBKR gateway host (for ibkr exchange)
+              example: 127.0.0.1
+            ibkr_port:
+              type: integer
+              description: IBKR gateway port (for ibkr exchange)
+              example: 7497
+            ibkr_client_id:
+              type: integer
+              description: IBKR client ID (for ibkr exchange)
+              example: 1
+            ibkr_account:
+              type: string
+              description: IBKR account ID (for ibkr exchange)
+              example: ""
+            mt5_server:
+              type: string
+              description: MT5 server (for mt5 exchange)
+              example: ""
+            mt5_login:
+              type: string
+              description: MT5 login (for mt5 exchange)
+              example: ""
+            mt5_password:
+              type: string
+              description: MT5 password (for mt5 exchange)
+              example: ""
+            mt5_terminal_path:
+              type: string
+              description: Optional MT5 terminal executable path (for mt5 exchange)
+              example: ""
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                id:
+                  type: integer
+                  example: 1
+      400:
+        description: Missing required fields
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 0
+            msg:
+              type: string
+              example: Missing exchange_id
+    security:
+      - Bearer: []
     """
     try:
         user_id = g.user_id
@@ -198,7 +378,48 @@ def create_credential():
 @credentials_bp.route('/delete', methods=['DELETE'])
 @login_required
 def delete_credential():
-    """Delete a credential for the current user."""
+    """
+    Delete a credential for the current user.
+
+    ---
+    tags:
+      - credentials
+    parameters:
+      - in: query
+        name: id
+        type: integer
+        required: true
+        description: Credential ID to delete
+        example: 1
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: string
+              example: null
+      400:
+        description: Missing id parameter
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 0
+            msg:
+              type: string
+              example: Missing id
+    security:
+      - Bearer: []
+    """
     try:
         user_id = g.user_id
         cred_id = request.args.get('id', type=int)
@@ -225,7 +446,61 @@ def delete_credential():
 @login_required
 def get_credential():
     """
-    Return decrypted credential for form auto-fill.
+    Get a single credential with decrypted config for form auto-fill.
+
+    ---
+    tags:
+      - credentials
+    parameters:
+      - in: query
+        name: id
+        type: integer
+        required: true
+        description: Credential ID
+        example: 1
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                id:
+                  type: integer
+                  example: 1
+                name:
+                  type: string
+                  example: My Binance Key
+                exchange_id:
+                  type: string
+                  example: binance
+                api_key_hint:
+                  type: string
+                  example: abcd***efgh
+                config:
+                  type: object
+                  description: Decrypted credential configuration
+      404:
+        description: Credential not found
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 0
+            msg:
+              type: string
+              example: Not found
+    security:
+      - Bearer: []
     """
     try:
         user_id = g.user_id

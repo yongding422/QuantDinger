@@ -114,19 +114,82 @@ def _release_inflight(key: str):
 @login_required
 def analyze():
     """
-    Fast AI analysis for any symbol.
-    
-    POST /api/fast-analysis/analyze
-    Body: {
-        "market": "Crypto" | "USStock" | "Forex" | ...,
-        "symbol": "BTC/USDT" | "AAPL" | ...,
-        "language": "zh-CN" | "en-US" (optional),
-        "model": "openai/gpt-4o" (optional),
-        "timeframe": "1D" (optional)
-    }
-    
-    Returns:
-        Fast analysis result with actionable recommendations.
+    Perform fast AI analysis for any symbol.
+
+    ---
+    tags:
+      - fast-analysis
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - market
+            - symbol
+          properties:
+            market:
+              type: string
+              description: Market type (Crypto, USStock, Forex, etc.)
+              example: Crypto
+            symbol:
+              type: string
+              description: Symbol to analyze (e.g., BTC/USDT, AAPL)
+              example: BTC/USDT
+            language:
+              type: string
+              description: Response language
+              example: en-US
+            model:
+              type: string
+              description: AI model to use
+              example: openai/gpt-4o
+            timeframe:
+              type: string
+              description: Timeframe for analysis
+              example: 1D
+            async_submit:
+              type: boolean
+              description: Submit analysis asynchronously
+              example: false
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                analysis:
+                  type: string
+                  example: Bullish trend detected...
+                memory_id:
+                  type: integer
+                  example: 123
+                credits_charged:
+                  type: integer
+                  example: 10
+                remaining_credits:
+                  type: number
+                  example: 90.0
+      400:
+        description: Missing required fields or insufficient credits
+      401:
+        description: Unauthorized
+      429:
+        description: Analysis already in progress
+      500:
+        description: Analysis error
+    security:
+      - Bearer: []
     """
     try:
         data = request.get_json() or {}
@@ -311,14 +374,75 @@ def analyze():
 @login_required
 def analyze_legacy():
     """
-    Fast analysis with legacy format output.
-    For backward compatibility with existing frontend.
-    
-    POST /api/fast-analysis/analyze-legacy
-    Body: Same as /analyze
-    
-    Returns:
-        Result in multi-agent format for frontend compatibility.
+    Fast analysis with legacy format output (backward compatibility).
+
+    ---
+    tags:
+      - fast-analysis
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - market
+            - symbol
+          properties:
+            market:
+              type: string
+              description: Market type (Crypto, USStock, Forex, etc.)
+              example: Crypto
+            symbol:
+              type: string
+              description: Symbol to analyze (e.g., BTC/USDT, AAPL)
+              example: BTC/USDT
+            language:
+              type: string
+              description: Response language
+              example: en-US
+            model:
+              type: string
+              description: AI model to use
+              example: openai/gpt-4o
+            timeframe:
+              type: string
+              description: Timeframe for analysis
+              example: 1D
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                analysis:
+                  type: string
+                  example: Multi-agent analysis result...
+                credits_charged:
+                  type: integer
+                  example: 10
+                remaining_credits:
+                  type: number
+                  example: 90.0
+      400:
+        description: Missing required fields or insufficient credits
+      401:
+        description: Unauthorized
+      429:
+        description: Analysis already in progress
+      500:
+        description: Analysis error
+    security:
+      - Bearer: []
     """
     try:
         data = request.get_json() or {}
@@ -452,9 +576,68 @@ def analyze_legacy():
 @login_required
 def get_history():
     """
-    Get analysis history for a symbol.
-    
-    GET /api/fast-analysis/history?market=Crypto&symbol=BTC/USDT&days=7&limit=10
+    Get analysis history for a specific symbol.
+
+    ---
+    tags:
+      - fast-analysis
+    parameters:
+      - in: query
+        name: market
+        type: string
+        required: true
+        description: Market type
+        example: Crypto
+      - in: query
+        name: symbol
+        type: string
+        required: true
+        description: Symbol
+        example: BTC/USDT
+      - in: query
+        name: days
+        type: integer
+        required: false
+        description: Number of days to look back
+        default: 7
+        example: 7
+      - in: query
+        name: limit
+        type: integer
+        required: false
+        description: Maximum number of results (max 50)
+        default: 10
+        example: 10
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                items:
+                  type: array
+                  items:
+                    type: object
+                total:
+                  type: integer
+                  example: 5
+      400:
+        description: Missing required query parameters
+      401:
+        description: Unauthorized
+      500:
+        description: Server error
+    security:
+      - Bearer: []
     """
     try:
         market = request.args.get('market', '').strip()
@@ -495,8 +678,59 @@ def get_history():
 def get_all_history():
     """
     Get all analysis history with pagination.
-    
-    GET /api/fast-analysis/history/all?page=1&pagesize=20
+
+    ---
+    tags:
+      - fast-analysis
+    parameters:
+      - in: query
+        name: page
+        type: integer
+        required: false
+        description: Page number (1-indexed)
+        default: 1
+        example: 1
+      - in: query
+        name: pagesize
+        type: integer
+        required: false
+        description: Items per page (max 50)
+        default: 20
+        example: 20
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                list:
+                  type: array
+                  items:
+                    type: object
+                total:
+                  type: integer
+                  example: 100
+                page:
+                  type: integer
+                  example: 1
+                pagesize:
+                  type: integer
+                  example: 20
+      401:
+        description: Unauthorized
+      500:
+        description: Server error
+    security:
+      - Bearer: []
     """
     try:
         page = int(request.args.get('page', 1))
@@ -532,9 +766,41 @@ def get_all_history():
 @login_required
 def delete_history(memory_id: int):
     """
-    Delete a history record.
-    
-    DELETE /api/fast-analysis/history/123
+    Delete a specific analysis history record.
+
+    ---
+    tags:
+      - fast-analysis
+    parameters:
+      - in: path
+        name: memory_id
+        type: integer
+        required: true
+        description: ID of the history record to delete
+        example: 123
+    responses:
+      200:
+        description: Deleted successfully
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: Deleted successfully
+            data:
+              type: string
+              example: null
+      401:
+        description: Unauthorized
+      404:
+        description: Record not found or no permission
+      500:
+        description: Server error
+    security:
+      - Bearer: []
     """
     try:
         # Get current user's ID to ensure they can only delete their own records
@@ -570,12 +836,56 @@ def delete_history(memory_id: int):
 def submit_feedback():
     """
     Submit user feedback on an analysis.
-    
-    POST /api/fast-analysis/feedback
-    Body: {
-        "memory_id": 123,
-        "feedback": "helpful" | "not_helpful" | "accurate" | "inaccurate"
-    }
+
+    ---
+    tags:
+      - fast-analysis
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - memory_id
+            - feedback
+          properties:
+            memory_id:
+              type: integer
+              description: ID of the analysis record
+              example: 123
+            feedback:
+              type: string
+              description: Feedback type
+              enum:
+                - helpful
+                - not_helpful
+                - accurate
+                - inaccurate
+              example: helpful
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: string
+              example: null
+      400:
+        description: Missing required fields or invalid feedback type
+      401:
+        description: Unauthorized
+      500:
+        description: Server error
+    security:
+      - Bearer: []
     """
     try:
         data = request.get_json() or {}
@@ -621,8 +931,57 @@ def submit_feedback():
 def get_performance():
     """
     Get AI analysis performance statistics.
-    
-    GET /api/fast-analysis/performance?market=Crypto&symbol=BTC/USDT&days=30
+
+    ---
+    tags:
+      - fast-analysis
+    parameters:
+      - in: query
+        name: market
+        type: string
+        required: false
+        description: Filter by market type
+        example: Crypto
+      - in: query
+        name: symbol
+        type: string
+        required: false
+        description: Filter by symbol
+        example: BTC/USDT
+      - in: query
+        name: days
+        type: integer
+        required: false
+        description: Number of days to analyze
+        default: 30
+        example: 30
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                total_analyses:
+                  type: integer
+                  example: 150
+                accuracy_rate:
+                  type: number
+                  example: 0.75
+      401:
+        description: Unauthorized
+      500:
+        description: Server error
+    security:
+      - Bearer: []
     """
     try:
         market = request.args.get('market', '').strip() or None
@@ -652,8 +1011,62 @@ def get_performance():
 def get_similar_patterns():
     """
     Get similar historical patterns for current market conditions.
-    
-    GET /api/fast-analysis/similar-patterns?market=Crypto&symbol=BTC/USDT
+
+    ---
+    tags:
+      - fast-analysis
+    parameters:
+      - in: query
+        name: market
+        type: string
+        required: true
+        description: Market type
+        example: Crypto
+      - in: query
+        name: symbol
+        type: string
+        required: true
+        description: Symbol
+        example: BTC/USDT
+    responses:
+      200:
+        description: Success
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                patterns:
+                  type: array
+                  items:
+                    type: object
+                current_indicators:
+                  type: object
+                  properties:
+                    rsi:
+                      type: number
+                      example: 65.5
+                    macd_signal:
+                      type: string
+                      example: bullish
+                    trend:
+                      type: string
+                      example: uptrend
+      400:
+        description: Missing required query parameters
+      401:
+        description: Unauthorized
+      500:
+        description: Server error
+    security:
+      - Bearer: []
     """
     try:
         market = request.args.get('market', '').strip()
