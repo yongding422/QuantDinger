@@ -21,6 +21,7 @@ const Settings = () => import('@/views/settings/Profile.vue')
 const Billing = () => import('@/views/billing/Billing.vue')
 const Community = () => import('@/views/community/Community.vue')
 const UserManagement = () => import('@/views/user/UserManagement.vue')
+const SystemHealth = () => import('@/views/admin/SystemHealth.vue')
 const IBKR = () => import('@/views/trading/IBKR.vue')
 const MT5 = () => import('@/views/trading/MT5.vue')
 
@@ -121,6 +122,12 @@ const routes: RouteRecordRaw[] = [
     path: '/admin/users',
     name: 'user-management',
     component: UserManagement,
+    meta: { requiresAuth: true, requiresAdmin: true },
+  },
+  {
+    path: '/admin/system-health',
+    name: 'system-health',
+    component: SystemHealth,
     meta: { requiresAuth: true, requiresAdmin: true },
   },
   {
