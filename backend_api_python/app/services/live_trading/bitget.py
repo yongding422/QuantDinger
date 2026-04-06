@@ -61,6 +61,10 @@ class BitgetMixClient(BaseRestClient):
         self._lev_cache: Dict[str, Tuple[float, bool]] = {}
         self._lev_cache_ttl_sec = 60.0
 
+        # posMode from GET /api/v2/mix/account/account (hedge_mode vs one_way_mode), cached per contract.
+        self._pos_mode_cache: Dict[str, Tuple[float, str]] = {}
+        self._pos_mode_cache_ttl_sec = 60.0
+
     @staticmethod
     def _to_dec(x: Any) -> Decimal:
         try:
@@ -242,6 +246,31 @@ class BitgetMixClient(BaseRestClient):
                 raise LiveTradingError(f"Bitget error: {data}")
         return data if isinstance(data, dict) else {"raw": data}
 
+    def _post_mix_place_order(
+        self,
+        body: Dict[str, Any],
+        *,
+        original_side: str,
+        reduce_only: bool,
+    ) -> Dict[str, Any]:
+        """
+        POST place-order; on 40774 (hedge vs one-way mismatch) retry with alternate position fields.
+        """
+        sd = (original_side or "").lower()
+        try:
+            return self._signed_request("POST", "/api/v2/mix/order/place-order", json_body=body)
+        except LiveTradingError as e:
+            if "40774" not in str(e):
+                raise
+            b2: Dict[str, Any] = {k: v for k, v in body.items() if k not in ("side", "tradeSide", "reduceOnly")}
+            if "tradeSide" in body:
+                b2["side"] = sd
+                b2["reduceOnly"] = "YES" if reduce_only else "NO"
+            else:
+                b2["tradeSide"] = "close" if reduce_only else "open"
+                b2["side"] = ("sell" if sd == "buy" else "buy") if reduce_only else sd
+            return self._signed_request("POST", "/api/v2/mix/order/place-order", json_body=b2)
+
     def _public_request(self, method: str, path: str, *, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         code, data, text = self._request(method, path, params=params, headers=None, json_body=None, data=None)
         if code >= 400:
@@ -251,6 +280,117 @@ class BitgetMixClient(BaseRestClient):
             if c and c not in ("00000", "0"):
                 raise LiveTradingError(f"Bitget error: {data}")
         return data if isinstance(data, dict) else {"raw": data}
+
+    def get_ticker(self, *, symbol: str, **kwargs: Any) -> Dict[str, Any]:
+        """
+        Public mix ticker (for USDT-notional -> base size conversion in quick trade).
+
+        Endpoint: GET /api/v2/mix/market/ticker
+        """
+        sym = to_bitget_um_symbol(symbol)
+        pt = str(kwargs.get("product_type") or "USDT-FUTURES")
+        if not sym:
+            return {}
+        try:
+            raw = self._public_request(
+                "GET",
+                "/api/v2/mix/market/ticker",
+                params={"symbol": sym, "productType": pt},
+            )
+        except Exception:
+            return {}
+        data = raw.get("data") if isinstance(raw, dict) else None
+        if isinstance(data, list) and data:
+            data = data[0]
+        if not isinstance(data, dict):
+            return {}
+        try:
+            last = float(
+                data.get("lastPr")
+                or data.get("last")
+                or data.get("close")
+                or data.get("markPrice")
+                or data.get("indexPrice")
+                or 0
+            )
+        except Exception:
+            last = 0.0
+        if last <= 0:
+            return {}
+        return {"last": last, "price": last, "close": last}
+
+    def get_account_pos_mode(
+        self,
+        *,
+        symbol: str,
+        margin_coin: str = "USDT",
+        product_type: str = "USDT-FUTURES",
+    ) -> str:
+        """
+        Returns Bitget posMode for the contract account: 'hedge_mode', 'one_way_mode', or '' if unknown.
+
+        GET /api/v2/mix/account/account
+        """
+        sym = to_bitget_um_symbol(symbol)
+        if not sym:
+            return ""
+        mc = (margin_coin or "USDT").strip().upper()
+        pt = str(product_type or "USDT-FUTURES")
+        key = f"{pt}:{sym}:{mc}"
+        now = time.time()
+        cached = self._pos_mode_cache.get(key)
+        if cached:
+            ts, mode = cached
+            if (now - float(ts or 0.0)) <= float(self._pos_mode_cache_ttl_sec or 60.0) and mode is not None:
+                return str(mode)
+
+        try:
+            resp = self._signed_request(
+                "GET",
+                "/api/v2/mix/account/account",
+                params={
+                    "symbol": sym.lower(),
+                    "productType": pt,
+                    "marginCoin": mc.lower() or "usdt",
+                },
+            )
+            d = resp.get("data") if isinstance(resp, dict) else None
+            mode = ""
+            if isinstance(d, dict):
+                mode = str(d.get("posMode") or "").strip().lower()
+            self._pos_mode_cache[key] = (now, mode)
+            return mode
+        except Exception:
+            return ""
+
+    def _mix_order_position_fields(
+        self,
+        *,
+        symbol: str,
+        side: str,
+        reduce_only: bool,
+        margin_coin: str,
+        product_type: str,
+    ) -> Dict[str, Any]:
+        """
+        Bitget mix place-order: hedge_mode requires tradeSide open/close; one_way_mode requires reduceOnly YES/NO
+        and must not send tradeSide (see Bitget API doc + CCXT bitget.py).
+        """
+        sd = (side or "").lower()
+        if sd not in ("buy", "sell"):
+            raise LiveTradingError(f"Invalid side: {side}")
+        pos_mode = self.get_account_pos_mode(
+            symbol=symbol, margin_coin=margin_coin, product_type=product_type
+        )
+        hedge = pos_mode == "hedge_mode"
+        if hedge:
+            # Mirror CCXT: hedge close flips side; hedge open keeps side + tradeSide open.
+            out: Dict[str, Any] = {
+                "tradeSide": "close" if reduce_only else "open",
+                "side": ("sell" if sd == "buy" else "buy") if reduce_only else sd,
+            }
+            return out
+        return {"side": sd, "reduceOnly": "YES" if reduce_only else "NO"}
 
     def get_contract(self, *, symbol: str, product_type: str = "USDT-FUTURES") -> Dict[str, Any]:
         """
@@ -354,13 +494,34 @@ class BitgetMixClient(BaseRestClient):
         """
         return self._signed_request("GET", "/api/v2/mix/account/accounts", params={"productType": str(product_type or "USDT-FUTURES")})
 
-    def get_positions(self, *, product_type: str = "USDT-FUTURES") -> Dict[str, Any]:
+    def get_positions(self, *, product_type: str = "USDT-FUTURES", symbol: str = "") -> Dict[str, Any]:
         """
-        Get all positions (best-effort).
+        Get positions (best-effort).
 
         Endpoint: GET /api/v2/mix/position/all-position
+        When ``symbol`` is set (e.g. ETH/USDT), filters the response list to that contract only.
         """
-        return self._signed_request("GET", "/api/v2/mix/position/all-position", params={"productType": str(product_type or "USDT-FUTURES")})
+        resp = self._signed_request(
+            "GET",
+            "/api/v2/mix/position/all-position",
+            params={"productType": str(product_type or "USDT-FUTURES")},
+        )
+        want = (symbol or "").strip()
+        if not want:
+            return resp
+        sym_key = to_bitget_um_symbol(want).upper()
+        if not isinstance(resp, dict):
+            return resp
+        data = resp.get("data")
+        if not isinstance(data, list):
+            return resp
+        filtered = [
+            p for p in data
+            if isinstance(p, dict) and str(p.get("symbol") or "").strip().upper() == sym_key
+        ]
+        out = dict(resp)
+        out["data"] = filtered
+        return out
 
     def set_leverage(
         self,
@@ -444,16 +605,22 @@ class BitgetMixClient(BaseRestClient):
             "productType": str(product_type or "USDT-FUTURES"),
             "marginCoin": str(margin_coin or "USDT"),
             "marginMode": self._normalize_margin_mode(margin_mode),
-            "side": sd,
             "orderType": "market",
             "size": self._dec_str(sz_dec, strict_precision=sz_precision),
         }
-        if reduce_only:
-            body["reduceOnly"] = "YES"
+        body.update(
+            self._mix_order_position_fields(
+                symbol=symbol,
+                side=sd,
+                reduce_only=reduce_only,
+                margin_coin=str(margin_coin or "USDT"),
+                product_type=str(product_type or "USDT-FUTURES"),
+            )
+        )
         if client_order_id:
             body["clientOid"] = str(client_order_id)
 
-        raw = self._signed_request("POST", "/api/v2/mix/order/place-order", json_body=body)
+        raw = self._post_mix_place_order(body, original_side=sd, reduce_only=reduce_only)
         data = raw.get("data") if isinstance(raw, dict) else None
         exchange_order_id = ""
         if isinstance(data, dict):
@@ -498,21 +665,27 @@ class BitgetMixClient(BaseRestClient):
             "productType": str(product_type or "USDT-FUTURES"),
             "marginCoin": str(margin_coin or "USDT"),
             "marginMode": self._normalize_margin_mode(margin_mode),
-            "side": sd,
             "orderType": "limit",
             "price": str(px),
             "size": self._dec_str(sz_dec, strict_precision=sz_precision),
         }
+        body.update(
+            self._mix_order_position_fields(
+                symbol=symbol,
+                side=sd,
+                reduce_only=reduce_only,
+                margin_coin=str(margin_coin or "USDT"),
+                product_type=str(product_type or "USDT-FUTURES"),
+            )
+        )
         # Force maker behavior when requested (avoid taker fills).
         if post_only:
             body["force"] = "post_only"
         else:
             body["force"] = "gtc"
-        if reduce_only:
-            body["reduceOnly"] = "YES"
         if client_order_id:
             body["clientOid"] = str(client_order_id)
-        raw = self._signed_request("POST", "/api/v2/mix/order/place-order", json_body=body)
+        raw = self._post_mix_place_order(body, original_side=sd, reduce_only=reduce_only)
         data = raw.get("data") if isinstance(raw, dict) else None
         exchange_order_id = str(data.get("orderId") or data.get("clientOid") or "") if isinstance(data, dict) else ""
         return LiveOrderResult(exchange_id="bitget", exchange_order_id=exchange_order_id, filled=0.0, avg_price=0.0, raw=raw)

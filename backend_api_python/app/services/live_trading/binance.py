@@ -40,6 +40,10 @@ class BinanceFuturesClient(BaseRestClient):
         self._dual_side_cache: Optional[Tuple[float, bool]] = None
         self._dual_side_cache_ttl_sec = 60.0
 
+        # serverTime - local_ms; avoids Binance -1021 when the host clock is ahead of Binance.
+        self._time_offset_ms: int = 0
+        self._time_sync_monotonic: float = 0.0
+
     @staticmethod
     def _to_dec(x: Any) -> Decimal:
         try:
@@ -163,6 +167,26 @@ class BinanceFuturesClient(BaseRestClient):
     def _signed_headers(self) -> Dict[str, str]:
         return {"X-MBX-APIKEY": self.api_key}
 
+    def _ensure_server_time(self, *, force: bool = False) -> None:
+        """
+        Align signed request timestamps with Binance server time (GET /fapi/v1/time).
+        """
+        now_m = time.monotonic()
+        if not force and (now_m - float(self._time_sync_monotonic or 0.0)) < 300.0:
+            return
+        try:
+            code, data, _ = self._request("GET", "/fapi/v1/time")
+            if code != 200 or not isinstance(data, dict):
+                return
+            server_ms = int(data.get("serverTime") or 0)
+            if server_ms <= 0:
+                return
+            local_ms = int(time.time() * 1000)
+            self._time_offset_ms = server_ms - local_ms
+            self._time_sync_monotonic = now_m
+        except Exception:
+            pass
+
     def _format_client_order_id(self, client_order_id: Optional[str]) -> str:
         raw = str(client_order_id or "").strip()
         broker_id = str(self.broker_id or "").strip()
@@ -179,17 +203,34 @@ class BinanceFuturesClient(BaseRestClient):
         return f"{prefix}{raw[:suffix_budget]}"
 
     def _signed_request(self, method: str, path: str, *, params: Dict[str, Any]) -> Dict[str, Any]:
-        p = dict(params or {})
-        # Use server-accepted timestamp in ms.
-        p["timestamp"] = int(time.time() * 1000)
-        qs = urlencode(p, doseq=True)
-        p["signature"] = self._sign(qs)
-        code, data, text = self._request(method, path, params=p, headers=self._signed_headers())
-        if code >= 400:
-            raise LiveTradingError(f"Binance HTTP {code}: {text[:500]}")
-        if isinstance(data, dict) and data.get("code") and int(data.get("code")) < 0:
-            raise LiveTradingError(f"Binance error: {data}")
-        return data if isinstance(data, dict) else {"raw": data}
+        self._ensure_server_time()
+        last_err: Optional[LiveTradingError] = None
+        for attempt in range(2):
+            p = dict(params or {})
+            p["timestamp"] = int(time.time() * 1000) + int(self._time_offset_ms)
+            if "recvWindow" not in p:
+                p["recvWindow"] = 10000
+            qs = urlencode(p, doseq=True)
+            p["signature"] = self._sign(qs)
+            code, data, text = self._request(method, path, params=p, headers=self._signed_headers())
+            if code >= 400:
+                err = LiveTradingError(f"Binance HTTP {code}: {text[:500]}")
+                if attempt == 0 and ("-1021" in text or "1021" in text):
+                    self._ensure_server_time(force=True)
+                    last_err = err
+                    continue
+                raise err
+            if isinstance(data, dict) and data.get("code") and int(data.get("code")) < 0:
+                err = LiveTradingError(f"Binance error: {data}")
+                if attempt == 0 and int(data.get("code") or 0) == -1021:
+                    self._ensure_server_time(force=True)
+                    last_err = err
+                    continue
+                raise err
+            return data if isinstance(data, dict) else {"raw": data}
+        if last_err:
+            raise last_err
+        raise LiveTradingError("Binance signed request failed")
 
     def _public_request(self, method: str, path: str, *, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         code, data, text = self._request(method, path, params=params, headers=None, json_body=None, data=None)
@@ -870,12 +911,41 @@ class BinanceFuturesClient(BaseRestClient):
             raise LiveTradingError("Binance cancel_order requires order_id or client_order_id")
         return self._signed_request("DELETE", "/fapi/v1/order", params=params)
 
-    def get_positions(self) -> Any:
+    def set_margin_type(self, *, symbol: str, margin_mode: str) -> Dict[str, Any]:
         """
-        Return all futures positions (position risk endpoint).
+        Set symbol margin mode on USDT-M futures.
+
+        Endpoint: POST /fapi/v1/marginType
+        margin_mode: cross | crossed | isolated
+        """
+        sym = to_binance_futures_symbol(symbol)
+        m = (margin_mode or "").strip().lower()
+        if m in ("cross", "crossed"):
+            mt = "CROSSED"
+        elif m in ("isolated", "iso"):
+            mt = "ISOLATED"
+        else:
+            raise LiveTradingError(f"Invalid margin_mode for Binance: {margin_mode}")
+        return self._signed_request("POST", "/fapi/v1/marginType", params={"symbol": sym, "marginType": mt})
+
+    def get_positions(self, *, symbol: str = "") -> Any:
+        """
+        Futures positions (position risk). Optional ``symbol`` filters to one contract.
 
         Endpoint: GET /fapi/v2/positionRisk
         """
-        return self._signed_request("GET", "/fapi/v2/positionRisk", params={})
+        raw = self._signed_request("GET", "/fapi/v2/positionRisk", params={})
+        rows: list
+        if isinstance(raw, list):
+            rows = raw
+        elif isinstance(raw, dict) and isinstance(raw.get("raw"), list):
+            rows = raw["raw"]
+        else:
+            rows = []
+        want = (symbol or "").strip()
+        if not want:
+            return rows
+        sym = to_binance_futures_symbol(want)
+        return [p for p in rows if isinstance(p, dict) and str(p.get("symbol") or "") == sym]
 
 

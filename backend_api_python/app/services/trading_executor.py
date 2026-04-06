@@ -1,5 +1,8 @@
 """
-实时交易执行服务
+实时交易执行服务。
+
+策略线程：拉 K 线/价格、算信号，将订单写入 pending_orders。
+实盘成交由 PendingOrderWorker + app.services.live_trading（各所直连 REST）完成，不在此模块使用 ccxt 下单。
 """
 import time
 import threading
@@ -15,13 +18,17 @@ import json
 from decimal import Decimal, ROUND_DOWN, ROUND_UP
 import pandas as pd
 import numpy as np
-import ccxt
 
 from app.utils.logger import get_logger
 from app.utils.db import get_db_connection
 from app.data_sources import DataSourceFactory
 from app.services.kline import KlineService
 from app.services.indicator_params import IndicatorParamsParser, IndicatorCaller
+from app.services.strategy_script_runtime import (
+    ScriptBar,
+    StrategyScriptContext,
+    compile_strategy_script_handlers,
+)
 
 logger = get_logger(__name__)
 
@@ -465,6 +472,212 @@ class TradingExecutor:
             logger.error(f"Failed to stop strategy {strategy_id}: {str(e)}")
             logger.error(traceback.format_exc())
             return False
+
+    def _df_to_script_exec_df(self, df: pd.DataFrame) -> pd.DataFrame:
+        out = df.reset_index()
+        c0 = out.columns[0]
+        if c0 != 'time':
+            out.rename(columns={c0: 'time'}, inplace=True)
+        return out
+
+    def _script_default_position_ratio(self, trading_config: Dict[str, Any]) -> float:
+        try:
+            ep = (trading_config or {}).get('entry_pct')
+            if ep is not None:
+                return float(self._to_ratio(ep, default=0.06))
+        except Exception:
+            pass
+        return 0.06
+
+    def _hydrate_script_ctx_from_positions(self, ctx: StrategyScriptContext, strategy_id: int, symbol: str) -> None:
+        ctx.position.clear_position()
+        pl = self._get_current_positions(strategy_id, symbol)
+        if not pl:
+            return
+        p = pl[0]
+        side = (p.get('side') or 'long').strip().lower()
+        if side not in ('long', 'short'):
+            return
+        size = float(p.get('size') or 0)
+        ep = float(p.get('entry_price') or 0)
+        if size > 0:
+            ctx.position.open_position(side, ep, size)
+
+    def _init_script_strategy_context(
+        self,
+        strategy_id: int,
+        df: pd.DataFrame,
+        trading_config: Dict[str, Any],
+        initial_capital: float,
+    ) -> Tuple[StrategyScriptContext, Optional[pd.Timestamp]]:
+        df_exec = self._df_to_script_exec_df(df)
+        ctx = StrategyScriptContext(df_exec, float(initial_capital or 0))
+        raw = (trading_config or {}).get('script_runtime_state') or {}
+        params = raw.get('params') if isinstance(raw, dict) else {}
+        if isinstance(params, dict):
+            ctx._params = dict(params)
+        last_ts = None
+        ts_s = raw.get('last_closed_bar_ts') if isinstance(raw, dict) else None
+        if ts_s:
+            try:
+                last_ts = pd.Timestamp(ts_s)
+                if last_ts.tzinfo is None:
+                    last_ts = last_ts.tz_localize('UTC')
+                else:
+                    last_ts = last_ts.tz_convert('UTC')
+            except Exception:
+                last_ts = None
+        return ctx, last_ts
+
+    def _persist_script_runtime_state(self, strategy_id: int, closed_ts: Any, params: Dict[str, Any]) -> None:
+        try:
+            safe_params = json.loads(json.dumps(params or {}, default=str))
+        except Exception:
+            safe_params = {}
+        ts_str = ''
+        try:
+            if closed_ts is not None:
+                ts_str = pd.Timestamp(closed_ts).isoformat()
+        except Exception:
+            ts_str = ''
+        state = {'last_closed_bar_ts': ts_str, 'params': safe_params}
+        try:
+            with get_db_connection() as db:
+                cur = db.cursor()
+                cur.execute("SELECT trading_config FROM qd_strategies_trading WHERE id = %s", (strategy_id,))
+                row = cur.fetchone()
+                if not row:
+                    cur.close()
+                    return
+                tc = row.get('trading_config')
+                if isinstance(tc, str) and tc.strip():
+                    try:
+                        tc = json.loads(tc)
+                    except Exception:
+                        tc = {}
+                elif not isinstance(tc, dict):
+                    tc = {}
+                tc['script_runtime_state'] = state
+                cur.execute(
+                    "UPDATE qd_strategies_trading SET trading_config = %s WHERE id = %s",
+                    (json.dumps(tc, ensure_ascii=False), strategy_id),
+                )
+                db.commit()
+                cur.close()
+        except Exception as e:
+            logger.warning(f"Persist script runtime state failed: {e}")
+
+    def _script_orders_to_execution_signals(
+        self,
+        ctx: StrategyScriptContext,
+        trade_direction: str,
+        bar_close: float,
+        closed_ts: pd.Timestamp,
+        trading_config: Dict[str, Any],
+    ) -> List[Dict[str, Any]]:
+        td = str(trade_direction or 'both').lower()
+        if td not in ('long', 'short', 'both'):
+            td = 'both'
+        default_ratio = self._script_default_position_ratio(trading_config)
+        try:
+            ts_i = int(closed_ts.timestamp())
+        except Exception:
+            ts_i = int(time.time())
+        out: List[Dict[str, Any]] = []
+        trig = float(bar_close or 0)
+        for order in list(ctx._orders or []):
+            action = str(order.get('action') or '').lower()
+            try:
+                order_price = float(order.get('price') or bar_close or 0)
+            except Exception:
+                order_price = trig
+            raw_amt = order.get('amount')
+            pos_ratio = default_ratio
+            if raw_amt is not None:
+                try:
+                    v = float(raw_amt)
+                    if v > 0:
+                        pos_ratio = v
+                except Exception:
+                    pass
+            if action == 'close':
+                if ctx.position > 0:
+                    out.append({'type': 'close_long', 'trigger_price': order_price or trig, 'position_size': 0, 'timestamp': ts_i})
+                    ctx.position.clear_position()
+                elif ctx.position < 0:
+                    out.append({'type': 'close_short', 'trigger_price': order_price or trig, 'position_size': 0, 'timestamp': ts_i})
+                    ctx.position.clear_position()
+                continue
+            if action == 'buy':
+                if ctx.position < 0:
+                    out.append({'type': 'close_short', 'trigger_price': order_price or trig, 'position_size': 0, 'timestamp': ts_i})
+                    ctx.position.clear_position()
+                if td in ('long', 'both'):
+                    if ctx.position == 0:
+                        out.append({'type': 'open_long', 'trigger_price': order_price or trig, 'position_size': pos_ratio, 'timestamp': ts_i})
+                        ctx.position.open_position('long', order_price or trig, pos_ratio)
+                    else:
+                        out.append({'type': 'add_long', 'trigger_price': order_price or trig, 'position_size': pos_ratio, 'timestamp': ts_i})
+                        ctx.position.add_position(order_price or trig, pos_ratio)
+                continue
+            if action == 'sell':
+                if ctx.position > 0:
+                    out.append({'type': 'close_long', 'trigger_price': order_price or trig, 'position_size': 0, 'timestamp': ts_i})
+                    ctx.position.clear_position()
+                if td in ('short', 'both'):
+                    if ctx.position == 0:
+                        out.append({'type': 'open_short', 'trigger_price': order_price or trig, 'position_size': pos_ratio, 'timestamp': ts_i})
+                        ctx.position.open_position('short', order_price or trig, pos_ratio)
+                    else:
+                        out.append({'type': 'add_short', 'trigger_price': order_price or trig, 'position_size': pos_ratio, 'timestamp': ts_i})
+                        ctx.position.add_position(order_price or trig, pos_ratio)
+        return out
+
+    def _script_evaluate_new_closed_bar(
+        self,
+        df: pd.DataFrame,
+        ctx: StrategyScriptContext,
+        on_bar,
+        trade_direction: str,
+        last_closed_ts: Optional[pd.Timestamp],
+        strategy_id: int,
+        symbol: str,
+        trading_config: Dict[str, Any],
+    ) -> Tuple[List[Dict[str, Any]], Optional[pd.Timestamp]]:
+        if df is None or len(df) < 2:
+            return [], last_closed_ts
+        closed_ts = df.index[-2]
+        try:
+            if last_closed_ts is not None and closed_ts <= last_closed_ts:
+                return [], last_closed_ts
+        except Exception:
+            pass
+        df_exec = self._df_to_script_exec_df(df)
+        ctx._bars_df = df_exec
+        pos = len(df) - 2
+        ctx.current_index = int(pos)
+        row = df_exec.iloc[pos]
+        self._hydrate_script_ctx_from_positions(ctx, strategy_id, symbol)
+        ctx._orders = []
+        bar = ScriptBar(
+            open=float(row.get('open') or 0),
+            high=float(row.get('high') or 0),
+            low=float(row.get('low') or 0),
+            close=float(row.get('close') or 0),
+            volume=float(row.get('volume') or 0),
+            timestamp=row.get('time'),
+        )
+        try:
+            on_bar(ctx, bar)
+        except Exception as e:
+            logger.error(f"Strategy {strategy_id} script on_bar error: {e}")
+            logger.error(traceback.format_exc())
+            return [], last_closed_ts
+        bar_close = float(row.get('close') or 0)
+        pending = self._script_orders_to_execution_signals(ctx, trade_direction, bar_close, closed_ts, trading_config)
+        self._persist_script_runtime_state(strategy_id, closed_ts, ctx._params)
+        logger.info(f"Strategy {strategy_id} script closed bar {closed_ts} -> {len(pending)} signal(s)")
+        return pending, closed_ts
     
     def _run_strategy_loop(self, strategy_id: int):
         """
@@ -483,13 +696,15 @@ class TradingExecutor:
                 logger.error(f"Strategy {strategy_id} not found")
                 return
             
-            if strategy['strategy_type'] != 'IndicatorStrategy':
-                logger.error(f"Strategy {strategy_id} has unsupported strategy_type for realtime execution: {strategy['strategy_type']}")
+            stype = strategy.get('strategy_type') or ''
+            if stype not in ('IndicatorStrategy', 'ScriptStrategy'):
+                logger.error(f"Strategy {strategy_id} has unsupported strategy_type for realtime execution: {stype}")
                 return
-            
+            is_script = stype == 'ScriptStrategy'
+
             # 初始化策略状态
             trading_config = strategy['trading_config']
-            indicator_config = strategy['indicator_config']
+            indicator_config = strategy.get('indicator_config') or {}
             ai_model_config = strategy.get('ai_model_config') or {}
             execution_mode = (strategy.get('execution_mode') or 'signal').strip().lower()
             if execution_mode not in ['signal', 'live']:
@@ -545,68 +760,84 @@ class TradingExecutor:
             market_category = (strategy.get('market_category') or 'Crypto').strip()
             logger.info(f"Strategy {strategy_id} market_category: {market_category}")
 
-            # Check if this is a cross-sectional strategy
-            cs_strategy_type = trading_config.get('cs_strategy_type', 'single')
-            if cs_strategy_type == 'cross_sectional':
-                # Run cross-sectional strategy loop
-                self._run_cross_sectional_strategy_loop(
-                    strategy_id, strategy, trading_config, indicator_config, 
-                    ai_model_config, execution_mode, notification_config, 
-                    strategy_name, market_category, market_type, leverage, 
-                    initial_capital, indicator_code, indicator_id
-                )
-                return
-
-            # 初始化交易所连接（信号模式下无需真实连接）
-            exchange = None
-            
-            # 安全获取 initial_capital
+            # 安全获取 initial_capital（横截面分支也需要）
             try:
                 initial_capital_val = strategy.get('initial_capital', 1000)
                 if isinstance(initial_capital_val, (list, tuple)):
                     initial_capital_val = initial_capital_val[0] if initial_capital_val else 1000
                 initial_capital = float(initial_capital_val)
-            except:
+            except Exception:
                 logger.warning(f"Strategy {strategy_id} invalid initial_capital format, reset to 1000: {strategy.get('initial_capital')}")
                 initial_capital = 1000.0
-            
-            # 净值会在首次更新持仓时自动计算和更新
-            
-            # 获取指标代码
-            indicator_id = indicator_config.get('indicator_id')
-            indicator_code = indicator_config.get('indicator_code', '')
-            
-            # 如果代码为空，尝试从数据库获取
-            if not indicator_code and indicator_id:
-                indicator_code = self._get_indicator_code_from_db(indicator_id)
-            
-            if not indicator_code:
-                logger.error(f"Strategy {strategy_id} indicator_code is empty")
-                return
-            
-            # 确保 indicator_code 是字符串（处理 JSON 转义问题）
-            if not isinstance(indicator_code, str):
-                indicator_code = str(indicator_code)
-            
-            # 处理可能的 JSON 转义问题
-            if '\\n' in indicator_code and '\n' not in indicator_code:
+
+            indicator_id = None
+            indicator_code = ''
+            strategy_code = ''
+            on_init_script = None
+            on_bar_script = None
+
+            if is_script:
+                strategy_code = (strategy.get('strategy_code') or '').strip()
+                if not strategy_code:
+                    logger.error(f"Strategy {strategy_id} strategy_code is empty")
+                    return
+                if '\\n' in strategy_code and '\n' not in strategy_code:
+                    try:
+                        decoded = json.loads(f'"{strategy_code}"')
+                        if isinstance(decoded, str):
+                            strategy_code = decoded
+                    except Exception:
+                        strategy_code = (
+                            strategy_code.replace('\\n', '\n').replace('\\t', '\t').replace('\\r', '\r')
+                            .replace('\\"', '"').replace("\\'", "'").replace('\\\\', '\\')
+                        )
                 try:
-                    import json
-                    decoded = json.loads(f'"{indicator_code}"')
-                    if isinstance(decoded, str):
-                        indicator_code = decoded
-                        logger.info(f"Strategy {strategy_id} decoded escaped indicator_code")
+                    on_init_script, on_bar_script = compile_strategy_script_handlers(strategy_code)
                 except Exception as e:
-                    logger.warning(f"Strategy {strategy_id} JSON decode failed; falling back to manual unescape: {str(e)}")
-                    indicator_code = (
-                        indicator_code
-                        .replace('\\n', '\n')
-                        .replace('\\t', '\t')
-                        .replace('\\r', '\r')
-                        .replace('\\"', '"')
-                        .replace("\\'", "'")
-                        .replace('\\\\', '\\')
-                    )
+                    logger.error(f"Strategy {strategy_id} script compile failed: {e}")
+                    logger.error(traceback.format_exc())
+                    return
+            else:
+                indicator_config = strategy['indicator_config']
+                indicator_id = indicator_config.get('indicator_id')
+                indicator_code = indicator_config.get('indicator_code', '')
+                if not indicator_code and indicator_id:
+                    indicator_code = self._get_indicator_code_from_db(indicator_id)
+                if not indicator_code:
+                    logger.error(f"Strategy {strategy_id} indicator_code is empty")
+                    return
+                if not isinstance(indicator_code, str):
+                    indicator_code = str(indicator_code)
+                if '\\n' in indicator_code and '\n' not in indicator_code:
+                    try:
+                        decoded = json.loads(f'"{indicator_code}"')
+                        if isinstance(decoded, str):
+                            indicator_code = decoded
+                            logger.info(f"Strategy {strategy_id} decoded escaped indicator_code")
+                    except Exception as e:
+                        logger.warning(f"Strategy {strategy_id} JSON decode failed; falling back to manual unescape: {str(e)}")
+                        indicator_code = (
+                            indicator_code.replace('\\n', '\n').replace('\\t', '\t').replace('\\r', '\r')
+                            .replace('\\"', '"').replace("\\'", "'").replace('\\\\', '\\')
+                        )
+
+            # Check if this is a cross-sectional strategy（仅指标策略支持）
+            cs_strategy_type = trading_config.get('cs_strategy_type', 'single')
+            if (not is_script) and cs_strategy_type == 'cross_sectional':
+                self._run_cross_sectional_strategy_loop(
+                    strategy_id, strategy, trading_config, strategy['indicator_config'],
+                    ai_model_config, execution_mode, notification_config,
+                    strategy_name, market_category, market_type, leverage,
+                    initial_capital, indicator_code, indicator_id
+                )
+                return
+
+            if is_script and cs_strategy_type == 'cross_sectional':
+                logger.error(f"Strategy {strategy_id} ScriptStrategy does not support cross_sectional mode")
+                return
+
+            # 初始化交易所连接（信号模式下无需真实连接）
+            exchange = None
             
             # ============================================
             # 初始化阶段：获取历史K线并计算指标
@@ -658,29 +889,47 @@ class TradingExecutor:
                 initial_position_count = 1  # 简化处理，假设是单笔持仓
                 initial_last_add_price = initial_avg_entry_price
 
-            # 关键诊断日志：确认指标是否拿到了持仓状态
             logger.info(
-                f"策略 {strategy_id} 指标注入持仓状态: count={len(current_pos_list)}, "
+                f"策略 {strategy_id} 持仓快照: count={len(current_pos_list)}, "
                 f"position={initial_position}, entry_price={initial_avg_entry_price}, highest={initial_highest}"
             )
 
-            # 执行指标代码，获取信号和触发价格
-            indicator_result = self._execute_indicator_with_prices(
-                indicator_code, df, trading_config, 
-                initial_highest_price=initial_highest,
-                initial_position=initial_position,
-                initial_avg_entry_price=initial_avg_entry_price,
-                initial_position_count=initial_position_count,
-                initial_last_add_price=initial_last_add_price
-            )
-            if indicator_result is None:
-                logger.error(f"Strategy {strategy_id} indicator execution failed")
-                return
-            
-            # 提取信号和触发价格
-            pending_signals = indicator_result.get('pending_signals', [])  # 待触发的信号列表
-            last_kline_time = indicator_result.get('last_kline_time', 0)  # 最后一根K线的时间
-            
+            script_ctx = None
+            last_script_closed_ts = None
+            if is_script:
+                script_ctx, last_script_closed_ts = self._init_script_strategy_context(
+                    strategy_id, df, trading_config, initial_capital
+                )
+                if on_init_script:
+                    self._hydrate_script_ctx_from_positions(script_ctx, strategy_id, symbol)
+                    try:
+                        on_init_script(script_ctx)
+                    except Exception as e:
+                        logger.error(f"Strategy {strategy_id} on_init error: {e}")
+                        logger.error(traceback.format_exc())
+                pending_signals, last_script_closed_ts = self._script_evaluate_new_closed_bar(
+                    df, script_ctx, on_bar_script, trade_direction,
+                    last_script_closed_ts, strategy_id, symbol, trading_config,
+                )
+                try:
+                    last_kline_time = int(df.index[-1].timestamp())
+                except Exception:
+                    last_kline_time = int(time.time())
+            else:
+                indicator_result = self._execute_indicator_with_prices(
+                    indicator_code, df, trading_config,
+                    initial_highest_price=initial_highest,
+                    initial_position=initial_position,
+                    initial_avg_entry_price=initial_avg_entry_price,
+                    initial_position_count=initial_position_count,
+                    initial_last_add_price=initial_last_add_price
+                )
+                if indicator_result is None:
+                    logger.error(f"Strategy {strategy_id} indicator execution failed")
+                    return
+                pending_signals = indicator_result.get('pending_signals', [])
+                last_kline_time = indicator_result.get('last_kline_time', 0)
+
             logger.info(f"Strategy {strategy_id} initialized; pending_signals={len(pending_signals)}")
             if pending_signals:
                 logger.info(f"Initial signals: {pending_signals}")
@@ -744,52 +993,63 @@ class TradingExecutor:
                         if klines and len(klines) >= 2:
                             df = self._klines_to_dataframe(klines)
                             if len(df) > 0:
-                                current_pos_list = self._get_current_positions(strategy_id, symbol)
-                                initial_highest = 0.0
-                                initial_position = 0
-                                initial_avg_entry_price = 0.0
-                                initial_position_count = 0
-                                initial_last_add_price = 0.0
-
-                                if current_pos_list:
-                                    pos = current_pos_list[0]
-                                    initial_highest = float(pos.get('highest_price', 0) or 0)
-                                    pos_side = pos.get('side', 'long')
-                                    initial_position = 1 if pos_side == 'long' else -1
-                                    initial_avg_entry_price = float(pos.get('entry_price', 0) or 0)
-                                    initial_position_count = 1
-                                    initial_last_add_price = initial_avg_entry_price
-
-                                indicator_result = self._execute_indicator_with_prices(
-                                    indicator_code, df, trading_config,
-                                    initial_highest_price=initial_highest,
-                                    initial_position=initial_position,
-                                    initial_avg_entry_price=initial_avg_entry_price,
-                                    initial_position_count=initial_position_count,
-                                    initial_last_add_price=initial_last_add_price
-                                )
-                                if indicator_result:
-                                    pending_signals = indicator_result.get('pending_signals', [])
-                                    last_kline_time = indicator_result.get('last_kline_time', 0)
-                                    new_hp = indicator_result.get('new_highest_price', 0)
-
+                                if is_script:
+                                    new_sig, last_script_closed_ts = self._script_evaluate_new_closed_bar(
+                                        df, script_ctx, on_bar_script, trade_direction,
+                                        last_script_closed_ts, strategy_id, symbol, trading_config,
+                                    )
+                                    pending_signals = new_sig
+                                    try:
+                                        last_kline_time = int(df.index[-1].timestamp())
+                                    except Exception:
+                                        last_kline_time = int(time.time())
                                     last_kline_update_time = current_time
+                                else:
+                                    current_pos_list = self._get_current_positions(strategy_id, symbol)
+                                    initial_highest = 0.0
+                                    initial_position = 0
+                                    initial_avg_entry_price = 0.0
+                                    initial_position_count = 0
+                                    initial_last_add_price = 0.0
 
-                                    # 更新 highest_price（使用最新 close 作为 current_price 的近似）
-                                    if new_hp > 0 and current_pos_list:
-                                        current_close = float(df['close'].iloc[-1])
-                                        for p in current_pos_list:
-                                            self._update_position(
-                                                strategy_id, p['symbol'], p['side'],
-                                                float(p['size']), float(p['entry_price']),
-                                                current_close,
-                                                highest_price=new_hp
-                                            )
+                                    if current_pos_list:
+                                        pos = current_pos_list[0]
+                                        initial_highest = float(pos.get('highest_price', 0) or 0)
+                                        pos_side = pos.get('side', 'long')
+                                        initial_position = 1 if pos_side == 'long' else -1
+                                        initial_avg_entry_price = float(pos.get('entry_price', 0) or 0)
+                                        initial_position_count = 1
+                                        initial_last_add_price = initial_avg_entry_price
+
+                                    indicator_result = self._execute_indicator_with_prices(
+                                        indicator_code, df, trading_config,
+                                        initial_highest_price=initial_highest,
+                                        initial_position=initial_position,
+                                        initial_avg_entry_price=initial_avg_entry_price,
+                                        initial_position_count=initial_position_count,
+                                        initial_last_add_price=initial_last_add_price
+                                    )
+                                    if indicator_result:
+                                        pending_signals = indicator_result.get('pending_signals', [])
+                                        last_kline_time = indicator_result.get('last_kline_time', 0)
+                                        new_hp = indicator_result.get('new_highest_price', 0)
+
+                                        last_kline_update_time = current_time
+
+                                        if new_hp > 0 and current_pos_list:
+                                            current_close = float(df['close'].iloc[-1])
+                                            for p in current_pos_list:
+                                                self._update_position(
+                                                    strategy_id, p['symbol'], p['side'],
+                                                    float(p['size']), float(p['entry_price']),
+                                                    current_close,
+                                                    highest_price=new_hp
+                                                )
                     else:
                         # ============================================
-                        # 3. 非K线更新tick：用当前价更新最后一根K线并重算指标（统一tick节奏）
+                        # 3. 非K线更新 tick：脚本策略不在这里重算（仅在新 K 收盘时 on_bar）
                         # ============================================
-                        if 'df' in locals() and df is not None and len(df) > 0:
+                        if (not is_script) and 'df' in locals() and df is not None and len(df) > 0:
                             try:
                                 realtime_df = df.copy()
                                 realtime_df = self._update_dataframe_with_current_price(realtime_df, current_price, timeframe)
@@ -1055,7 +1315,7 @@ class TradingExecutor:
                         initial_capital, leverage, decide_interval,
                         execution_mode, notification_config,
                         indicator_config, exchange_config, trading_config, ai_model_config,
-                        market_category
+                        market_category, strategy_code
                     FROM qd_strategies_trading
                     WHERE id = %s
                 """
@@ -1144,8 +1404,14 @@ class TradingExecutor:
         market_type: str = None,
         leverage: float = None,
         strategy_id: int = None
-    ) -> Optional[ccxt.Exchange]:
-        """(Mock) 信号模式不需要真实交易所连接"""
+    ) -> Any:
+        """
+        占位：策略线程内不创建交易所 SDK 实例。
+
+        实盘下单不经过本方法。信号经 _execute_exchange_order 写入 pending_orders，
+        由 PendingOrderWorker 使用 app.services.live_trading 下的直连 REST 客户端执行。
+        K 线/现价由 KlineService、DataSourceFactory 等数据层提供（该层可能使用 ccxt 拉行情，与下单解耦）。
+        """
         return None
     
     def _fetch_latest_kline(self, symbol: str, timeframe: str, limit: int = 500, market_category: str = 'Crypto') -> List[Dict[str, Any]]:
@@ -2434,14 +2700,13 @@ class TradingExecutor:
         signal_ts: int = 0,
     ) -> Optional[Dict[str, Any]]:
         """
-        Convert a signal into a concrete pending order and enqueue it into DB.
+        将信号转为 pending_orders 队列记录（本方法不直连交易所、不使用 ccxt）。
 
-        A separate worker will poll `pending_orders` and dispatch:
-        - execution_mode='signal': dispatch notifications (no real trading).
-        - execution_mode='live': reserved for future live trading execution (not implemented).
+        PendingOrderWorker 轮询执行：
+        - execution_mode='signal'：仅通知/模拟路径。
+        - execution_mode='live'：通过 live_trading 包内的各交易所 REST 客户端下单（非 ccxt）。
 
-        Note: Order execution settings (order_mode, maker_wait_sec, maker_offset_bps) are now
-        configured via environment variables and not passed from strategy config.
+        行情/K 线不在此处拉取；order_mode 等由环境变量配置。
         """
         try:
             # Reference price at enqueue time: use current tick price if provided to avoid extra fetch.

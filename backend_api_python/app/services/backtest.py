@@ -504,6 +504,12 @@ class BacktestService:
                     result['precision_info']['message'] = 'Using standard backtest because scale rules are not fully supported in MTF mode'
                 elif fallback_reason == 'signal_timing_not_supported_in_mtf':
                     result['precision_info']['message'] = 'Using standard backtest because this execution timing is not fully supported in MTF mode'
+            ea = result.get('executionAssumptions') or {}
+            ea['mtfRequested'] = bool(enable_mtf)
+            ea['mtfActive'] = False
+            if fallback_reason:
+                ea['mtfFallbackReason'] = fallback_reason
+            result['executionAssumptions'] = ea
             return result
         
         logger.info(f"Multi-timeframe backtest: strategy_tf={timeframe}, exec_tf={exec_tf}, range={start_date} ~ {end_date}")
@@ -554,6 +560,11 @@ class BacktestService:
                 'reason': 'data_unavailable',
                 'message': f'Cannot fetch {exec_tf} data, using standard backtest'
             }
+            ea = result.get('executionAssumptions') or {}
+            ea['mtfRequested'] = bool(enable_mtf)
+            ea['mtfActive'] = False
+            ea['mtfFallbackReason'] = 'data_unavailable'
+            result['executionAssumptions'] = ea
             return result
         
         logger.info(f"Data fetched: signal_candles={len(df_signal)}, exec_candles={len(df_exec)}")
@@ -598,6 +609,14 @@ class BacktestService:
             result['execution_timeframe'] = exec_tf
             result['signal_candles'] = len(df_signal)
             result['execution_candles'] = len(df_exec)
+            result['executionAssumptions'] = self._execution_assumptions(
+                strategy_config,
+                simulation_mode='mtf',
+                signal_timeframe=timeframe,
+                execution_timeframe=exec_tf,
+                mtf_requested=True,
+                mtf_active=True,
+            )
             logger.info("Backtest result formatted successfully")
         except Exception as e:
             logger.error(f"Failed to format result: {str(e)}")
@@ -1487,6 +1506,11 @@ class BacktestService:
             'precision': 'standard',
             'message': 'Using standard strategy script backtest'
         }
+        result['executionAssumptions'] = self._execution_assumptions(
+            strategy_config,
+            simulation_mode='standard',
+            signal_timeframe=timeframe,
+        )
         return result
     
     def run_code_strategy(
@@ -1607,7 +1631,13 @@ class BacktestService:
         metrics = self._calculate_metrics(equity_curve, trades, initial_capital, timeframe, start_date, end_date, total_commission)
         
         # 5. Format result
-        return self._format_result(metrics, equity_curve, trades)
+        result = self._format_result(metrics, equity_curve, trades)
+        result['executionAssumptions'] = self._execution_assumptions(
+            strategy_config,
+            simulation_mode='standard',
+            signal_timeframe=timeframe,
+        )
+        return result
     
     def _fetch_kline_data(
         self,
@@ -4740,6 +4770,46 @@ import pandas as pd
             logger.warning(f"Sharpe ratio calculation failed: {e}")
             return 0
     
+    def _execution_assumptions(
+        self,
+        strategy_config: Optional[Dict[str, Any]],
+        *,
+        simulation_mode: str,
+        signal_timeframe: Optional[str] = None,
+        execution_timeframe: Optional[str] = None,
+        mtf_requested: bool = False,
+        mtf_active: bool = False,
+        mtf_fallback_reason: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Human-facing metadata so the UI can explain how trades were timed vs chart markers.
+        Keys use camelCase for JSON consumers (frontend).
+        """
+        cfg = strategy_config or {}
+        raw = str((cfg.get('execution') or {}).get('signalTiming') or 'next_bar_open').strip().lower()
+        is_next_open = raw in ('next_bar_open', 'next_open', 'nextopen', 'next')
+        if raw in ('bar_close', 'close', 'same_bar_close', 'current_bar_close'):
+            timing_key = 'same_bar_close'
+        elif is_next_open:
+            timing_key = 'next_bar_open'
+        else:
+            timing_key = raw
+        default_fill = 'open' if is_next_open else 'close'
+        payload: Dict[str, Any] = {
+            'signalTiming': timing_key,
+            'signalTimingRaw': raw,
+            'defaultFillPrice': default_fill,
+            'simulationMode': simulation_mode,
+            'strategyTimeframe': signal_timeframe,
+            'executionTimeframe': execution_timeframe,
+            'engineVersion': self.ENGINE_VERSION,
+            'mtfRequested': bool(mtf_requested),
+            'mtfActive': bool(mtf_active),
+        }
+        if mtf_fallback_reason:
+            payload['mtfFallbackReason'] = mtf_fallback_reason
+        return payload
+
     def _format_result(
         self,
         metrics: Dict,

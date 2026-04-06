@@ -489,16 +489,35 @@ class StrategyService:
                                     f"but fails for market_type={market_type}. This is almost always a permissions/product mismatch."
                                 )
                             msg = f"{msg} | {hint}"
+                            hint_cn = (
+                                "币安接口返回 -2015（密钥/IP/权限不匹配）。请逐项核对："
+                                "① API Key 是否勾选与当前测试一致的业务（现货选现货权限，合约选合约/U 本位权限）；"
+                                "② 若启用 IP 白名单，是否包含当前服务器出口 IP（见下方 egress_ip）；"
+                                "③ base_url 与密钥环境一致（主网密钥配 api.binance.com / fapi，模拟盘配 demo 域名与 demo Key）；"
+                                "④ 无多余空格、复制完整 Secret。"
+                            )
+                            if alt_ok:
+                                hint_cn += (
+                                    f" 自动探测：同一密钥在 market_type={alt_market_type} 可通过，"
+                                    f"当前选择的 {market_type} 与密钥权限不一致的可能性很大。"
+                                )
+                        else:
+                            hint_cn = ""
+
+                        fail_payload = {
+                            'exchange': safe_cfg,
+                            'client': client_kind,
+                            'market_type': market_type,
+                            'egress_ip': egress_ip,
+                            'base_url': getattr(client, "base_url", "") or "",
+                        }
+                        if hint_cn:
+                            fail_payload['hint_cn'] = hint_cn
+
                         return {
                             'success': False,
                             'message': f'Auth failed: {msg}',
-                            'data': {
-                                'exchange': safe_cfg,
-                                'client': client_kind,
-                                'market_type': market_type,
-                                'egress_ip': egress_ip,
-                                'base_url': getattr(client, "base_url", "") or "",
-                            },
+                            'data': fail_payload,
                         }
 
                     return {

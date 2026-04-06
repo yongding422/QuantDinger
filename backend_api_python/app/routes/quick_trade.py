@@ -273,6 +273,13 @@ def place_order():
         tp_price = float(body.get("tp_price") or 0)
         sl_price = float(body.get("sl_price") or 0)
         source = str(body.get("source") or "manual").strip()
+        margin_mode = str(body.get("margin_mode") or body.get("marginMode") or "").strip().lower()
+        if margin_mode in ("cross", "crossed"):
+            margin_mode = "cross"
+        elif margin_mode in ("iso", "isolated"):
+            margin_mode = "isolated"
+        else:
+            margin_mode = ""
 
         # ---- validation ----
         if not credential_id:
@@ -286,27 +293,34 @@ def place_order():
         if order_type == "limit" and price <= 0:
             return jsonify({"code": 0, "msg": "price required for limit orders"}), 400
 
-        # ---- Auto-determine market_type from leverage ----
-        # leverage = 1 -> spot, leverage > 1 -> swap
-        if not market_type:
-            market_type = "spot" if leverage == 1 else "swap"
+        # ---- market_type: leverage 1 => spot API, else perpetual (swap) ----
         if market_type in ("futures", "future", "perp", "perpetual"):
             market_type = "swap"
-        # Override only when user did not explicitly choose market_type.
         if leverage > 1:
             market_type = "swap"
-        elif leverage == 1 and not str(body.get("market_type") or "").strip():
+        else:
             market_type = "spot"
 
         # ---- build exchange client ----
-        exchange_config = _build_exchange_config(credential_id, user_id, {
-            "market_type": market_type,
-        })
+        cfg_overrides: Dict[str, Any] = {"market_type": market_type}
+        if margin_mode in ("cross", "isolated"):
+            cfg_overrides["margin_mode"] = margin_mode
+            cfg_overrides["td_mode"] = margin_mode
+        exchange_config = _build_exchange_config(credential_id, user_id, cfg_overrides)
         exchange_id = (exchange_config.get("exchange_id") or "").strip().lower()
         if not exchange_id:
             return jsonify({"code": 0, "msg": "Invalid credential: missing exchange_id"}), 400
 
         client = _create_client(exchange_config, market_type=market_type)
+
+        # Binance USDT-M: sync isolated/cross margin mode (best-effort; may fail if open orders exist)
+        if market_type != "spot" and margin_mode in ("cross", "isolated"):
+            try:
+                from app.services.live_trading.binance import BinanceFuturesClient
+                if isinstance(client, BinanceFuturesClient):
+                    client.set_margin_type(symbol=symbol, margin_mode=margin_mode)
+            except Exception as me:
+                logger.warning(f"Binance set_margin_type failed (non-fatal): {me}")
 
         # ---- Convert USDT amount to base asset quantity ----
         # Quick trade always accepts USDT amount, convert to base qty for all exchanges
@@ -543,7 +557,16 @@ def get_balance():
                 raw = client.get_account()
                 balance_data = _parse_balance(raw, exchange_id, market_type)
             elif hasattr(client, "get_accounts"):
-                raw = client.get_accounts()
+                from app.services.live_trading.bitget import BitgetMixClient
+
+                if isinstance(client, BitgetMixClient):
+                    pt = str(exchange_config.get("product_type") or exchange_config.get("productType") or "USDT-FUTURES")
+                    raw = client.get_accounts(product_type=pt)
+                else:
+                    raw = client.get_accounts()
+                balance_data = _parse_balance(raw, exchange_id, market_type)
+            elif (exchange_id or "").lower() == "bitget" and market_type == "spot" and hasattr(client, "get_assets"):
+                raw = client.get_assets()
                 balance_data = _parse_balance(raw, exchange_id, market_type)
         except Exception as be:
             logger.warning(f"Balance fetch failed: {be}")
@@ -575,22 +598,62 @@ def _parse_balance(raw: Any, exchange_id: str, market_type: str) -> Dict[str, An
                         result["total"] = float(b.get("free") or 0) + float(b.get("locked") or 0)
                         return result
                 return result
+            ex = (exchange_id or "").lower()
+            # Bitget mix: { code, data: [ { marginCoin, available, accountEquity, ... } ] }
+            # Must run before OKX — both use data as a list; OKX fallback would zero Bitget.
+            if ex == "bitget" and (market_type or "").lower() != "spot":
+                bg_data = raw.get("data")
+                if isinstance(bg_data, list) and bg_data:
+                    row = None
+                    for item in bg_data:
+                        if isinstance(item, dict) and str(item.get("marginCoin") or "").upper() == "USDT":
+                            row = item
+                            break
+                    if row is None and isinstance(bg_data[0], dict):
+                        row = bg_data[0]
+                    if isinstance(row, dict):
+                        av = (
+                            row.get("available")
+                            or row.get("availableBalance")
+                            or row.get("crossedMaxAvailable")
+                            or row.get("isolatedMaxAvailable")
+                            or 0
+                        )
+                        eq = row.get("accountEquity") or row.get("usdtEquity") or row.get("equity") or av
+                        result["available"] = float(av or 0)
+                        result["total"] = float(eq or 0) if eq is not None else result["available"]
+                        return result
+            # Bitget spot: GET /api/v2/spot/account/assets
+            if ex == "bitget" and (market_type or "").lower() == "spot":
+                bg_data = raw.get("data")
+                if isinstance(bg_data, list):
+                    for b in bg_data:
+                        if isinstance(b, dict) and str(b.get("coin") or "").upper() == "USDT":
+                            avail = float(b.get("available") or 0)
+                            frozen = float(b.get("frozen") or b.get("locked") or 0)
+                            result["available"] = avail
+                            result["total"] = avail + frozen
+                            return result
+                    return result
             # OKX
             data = raw.get("data")
             if isinstance(data, list) and data:
                 first = data[0] if isinstance(data[0], dict) else {}
                 # Account balance
                 details = first.get("details", [])
-                if isinstance(details, list):
+                if isinstance(details, list) and details:
                     for d in details:
                         if str(d.get("ccy") or "").upper() == "USDT":
                             result["available"] = float(d.get("availBal") or d.get("availEq") or 0)
                             result["total"] = float(d.get("eq") or d.get("cashBal") or 0)
                             return result
-                # Fallback
-                result["available"] = float(first.get("availBal") or first.get("totalEq") or 0)
-                result["total"] = float(first.get("totalEq") or 0)
-                return result
+                # OKX-style single-account row (not Bitget — Bitget handled above)
+                if "availBal" in first or "availEq" in first or "totalEq" in first or "adjEq" in first:
+                    result["available"] = float(
+                        first.get("availBal") or first.get("availEq") or first.get("adjEq") or first.get("totalEq") or 0
+                    )
+                    result["total"] = float(first.get("totalEq") or first.get("adjEq") or 0)
+                    return result
             # Bybit
             if "result" in raw:
                 res = raw["result"]
@@ -636,6 +699,106 @@ def _parse_balance(raw: Any, exchange_id: str, market_type: str) -> Dict[str, An
     return result
 
 
+def _fetch_exchange_positions_raw(
+    client: Any,
+    exchange_config: Dict[str, Any],
+    *,
+    symbol: str,
+    market_type: str,
+) -> Any:
+    """
+    Fetch raw position payload for quick-trade / close-position.
+
+    Many clients do not accept ``symbol=`` on ``get_positions()`` (Gate, KuCoin, Bybit, Bitfinex),
+    or need extra args (Bitget ``product_type``, OKX ``inst_type``). Centralize here.
+    """
+    from app.services.live_trading.binance import BinanceFuturesClient
+    from app.services.live_trading.bitget import BitgetMixClient
+    from app.services.live_trading.bybit import BybitClient
+    from app.services.live_trading.deepcoin import DeepcoinClient
+    from app.services.live_trading.gate import GateUsdtFuturesClient
+    from app.services.live_trading.htx import HtxClient
+    from app.services.live_trading.kucoin import KucoinFuturesClient
+    from app.services.live_trading.okx import OkxClient
+    from app.services.live_trading.symbols import (
+        to_bybit_symbol,
+        to_gate_currency_pair,
+        to_kucoin_futures_symbol,
+        to_okx_spot_inst_id,
+        to_okx_swap_inst_id,
+    )
+
+    mt = (market_type or "swap").strip().lower()
+
+    if isinstance(client, OkxClient):
+        if mt == "spot":
+            inst_id = to_okx_spot_inst_id(symbol)
+            inst_type = "SPOT"
+        else:
+            inst_id = to_okx_swap_inst_id(symbol)
+            inst_type = "SWAP"
+        return client.get_positions(inst_id=inst_id, inst_type=inst_type)
+
+    if isinstance(client, BinanceFuturesClient):
+        return client.get_positions(symbol=symbol)
+
+    if isinstance(client, BitgetMixClient):
+        pt = str(exchange_config.get("product_type") or exchange_config.get("productType") or "USDT-FUTURES")
+        return client.get_positions(product_type=pt, symbol=symbol)
+
+    if isinstance(client, BybitClient):
+        raw = client.get_positions()
+        lst = (((raw or {}).get("result") or {}).get("list")) if isinstance(raw, dict) else None
+        if not isinstance(lst, list):
+            return raw
+        sym_norm = to_bybit_symbol(symbol)
+        filtered = [p for p in lst if isinstance(p, dict) and str(p.get("symbol") or "").strip() == sym_norm]
+        if isinstance(raw, dict):
+            out = dict(raw)
+            res = dict((raw.get("result") or {}) if isinstance(raw.get("result"), dict) else {})
+            res["list"] = filtered
+            out["result"] = res
+            return out
+        return {"result": {"list": filtered}}
+
+    if isinstance(client, GateUsdtFuturesClient):
+        raw = client.get_positions()
+        items = raw if isinstance(raw, list) else []
+        c = to_gate_currency_pair(symbol)
+        filtered = [p for p in items if isinstance(p, dict) and str(p.get("contract") or "").strip() == c]
+        return filtered
+
+    if isinstance(client, KucoinFuturesClient):
+        raw = client.get_positions()
+        data = raw.get("data") if isinstance(raw, dict) else []
+        sym = to_kucoin_futures_symbol(symbol)
+        if not isinstance(data, list):
+            data = []
+        filtered = [p for p in data if isinstance(p, dict) and str(p.get("symbol") or "").strip() == sym]
+        if isinstance(raw, dict):
+            out = dict(raw)
+            out["data"] = filtered
+            return out
+        return {"data": filtered}
+
+    if isinstance(client, HtxClient):
+        return client.get_positions(symbol=symbol)
+
+    if isinstance(client, DeepcoinClient):
+        return client.get_positions(symbol=symbol)
+
+    if hasattr(client, "get_positions"):
+        try:
+            return client.get_positions(symbol=symbol)
+        except TypeError:
+            return client.get_positions()
+
+    if hasattr(client, "get_position"):
+        return client.get_position(symbol=symbol)
+
+    return None
+
+
 @quick_trade_bp.route('/position', methods=['GET'])
 @login_required
 def get_position():
@@ -658,25 +821,10 @@ def get_position():
 
         positions = []
         try:
-            # OKX requires inst_id instead of symbol
-            from app.services.live_trading.okx import OkxClient
-            if isinstance(client, OkxClient):
-                from app.services.live_trading.symbols import to_okx_swap_inst_id, to_okx_spot_inst_id
-                if market_type == "spot":
-                    inst_id = to_okx_spot_inst_id(symbol)
-                    inst_type = "SPOT"
-                else:
-                    inst_id = to_okx_swap_inst_id(symbol)
-                    inst_type = "SWAP"
-                raw = client.get_positions(inst_id=inst_id, inst_type=inst_type)
-                positions = _parse_positions(raw)
-                logger.info(f"OKX positions query: inst_id={inst_id}, inst_type={inst_type}, found {len(positions)} positions")
-            elif hasattr(client, "get_positions"):
-                raw = client.get_positions(symbol=symbol)
-                positions = _parse_positions(raw)
-            elif hasattr(client, "get_position"):
-                raw = client.get_position(symbol=symbol)
-                positions = _parse_positions(raw)
+            raw = _fetch_exchange_positions_raw(
+                client, exchange_config, symbol=symbol, market_type=market_type
+            )
+            positions = _parse_positions(raw)
         except Exception as pe:
             logger.warning(f"Position fetch failed: {pe}")
             logger.warning(traceback.format_exc())
@@ -698,33 +846,62 @@ def _parse_positions(raw: Any) -> list:
         if isinstance(raw, list):
             items = raw
         elif isinstance(raw, dict):
-            data = raw.get("data") or raw.get("result") or raw.get("positions") or []
-            if isinstance(data, list):
-                items = data
-            elif isinstance(data, dict):
-                items = data.get("list", []) if "list" in data else [data]
+            if isinstance(raw.get("raw"), list):
+                items = raw["raw"]
+            else:
+                data = raw.get("data") or raw.get("result") or raw.get("positions") or []
+                if isinstance(data, list):
+                    items = data
+                elif isinstance(data, dict):
+                    items = data.get("list", []) if "list" in data else [data]
+                else:
+                    items = []
 
         for item in items:
             if not isinstance(item, dict):
                 continue
             # For OKX, position size can be in different fields
             # SWAP: posAmt, pos
+            # Binance futures: positionAmt
             # SPOT: bal (balance), availBal (available balance)
-            size = float(item.get("posAmt") or item.get("pos") or item.get("size") or item.get("contracts") or 
-                         item.get("bal") or item.get("availBal") or item.get("volume") or 0)
+            size = float(
+                item.get("positionAmt")
+                or item.get("posAmt")
+                or item.get("pos")
+                or item.get("total")
+                or item.get("currentQty")
+                or item.get("available")
+                or item.get("size")
+                or item.get("contracts")
+                or item.get("bal")
+                or item.get("availBal")
+                or item.get("volume")
+                or 0
+            )
             if abs(size) < 1e-10:
                 continue
             
-            # For spot, side is always "long" (you own the asset)
-            # For swap, determine side from sign of size
+            # Binance hedge: positionSide LONG/SHORT with positive positionAmt; one-way: BOTH + signed amt
             side = "long"
-            if size < 0:
+            psu = str(item.get("positionSide", "")).strip().upper()
+            if psu == "SHORT":
                 side = "short"
+            elif psu == "LONG":
+                side = "long"
             elif item.get("posSide"):
-                # OKX may have posSide field: "long" or "short"
                 pos_side = str(item.get("posSide", "")).strip().lower()
                 if pos_side in ("long", "short"):
                     side = pos_side
+            elif str(item.get("holdSide") or "").strip().lower() == "short":
+                side = "short"
+            elif str(item.get("holdSide") or "").strip().lower() == "long":
+                side = "long"
+            elif str(item.get("side") or "").strip().lower() in ("sell", "s"):
+                side = "short"
+            elif str(item.get("side") or "").strip().lower() in ("buy", "b"):
+                side = "long"
+            elif size < 0:
+                side = "short"
             elif item.get("direction"):
                 dir_side = str(item.get("direction") or "").strip().lower()
                 if dir_side in ("buy", "long"):
@@ -736,10 +913,36 @@ def _parse_positions(raw: Any) -> list:
                 "symbol": item.get("symbol") or item.get("instId") or "",
                 "side": side,
                 "size": abs(size),
-                "entry_price": float(item.get("entryPrice") or item.get("avgCost") or item.get("avgPx") or item.get("cost_open") or 0),
-                "unrealized_pnl": float(item.get("unRealizedProfit") or item.get("upl") or item.get("unrealisedPnl") or item.get("profit_unreal") or item.get("pnl") or 0),
+                "entry_price": float(
+                    item.get("entryPrice")
+                    or item.get("openPriceAvg")
+                    or item.get("avgEntryPrice")
+                    or item.get("avgPrice")
+                    or item.get("avgCost")
+                    or item.get("avgPx")
+                    or item.get("cost_open")
+                    or item.get("trade_avg_price")
+                    or 0
+                ),
+                "unrealized_pnl": float(
+                    item.get("unRealizedProfit")
+                    or item.get("unrealizedProfit")
+                    or item.get("unrealizedPnl")
+                    or item.get("upl")
+                    or item.get("unrealisedPnl")
+                    or item.get("profit_unreal")
+                    or item.get("pnl")
+                    or 0
+                ),
                 "leverage": float(item.get("leverage") or item.get("lever") or 1),
-                "mark_price": float(item.get("markPrice") or item.get("markPx") or item.get("last_price") or item.get("last") or 0),
+                "mark_price": float(
+                    item.get("markPrice")
+                    or item.get("markPx")
+                    or item.get("last_price")
+                    or item.get("last")
+                    or item.get("indexPrice")
+                    or 0
+                ),
             })
     except Exception as e:
         logger.warning(f"_parse_positions error: {e}")
@@ -791,21 +994,10 @@ def close_position():
         # ---- get current position ----
         positions = []
         try:
-            from app.services.live_trading.okx import OkxClient
-            if isinstance(client, OkxClient):
-                from app.services.live_trading.symbols import to_okx_swap_inst_id, to_okx_spot_inst_id
-                if market_type == "spot":
-                    inst_id = to_okx_spot_inst_id(symbol)
-                else:
-                    inst_id = to_okx_swap_inst_id(symbol)
-                raw = client.get_positions(inst_id=inst_id)
-                positions = _parse_positions(raw)
-            elif hasattr(client, "get_positions"):
-                raw = client.get_positions(symbol=symbol)
-                positions = _parse_positions(raw)
-            elif hasattr(client, "get_position"):
-                raw = client.get_position(symbol=symbol)
-                positions = _parse_positions(raw)
+            raw = _fetch_exchange_positions_raw(
+                client, exchange_config, symbol=symbol, market_type=market_type
+            )
+            positions = _parse_positions(raw)
         except Exception as pe:
             logger.warning(f"Position fetch failed: {pe}")
         

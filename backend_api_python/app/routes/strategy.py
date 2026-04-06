@@ -4,6 +4,7 @@ Trading Strategy API Routes
 from flask import Blueprint, request, jsonify, g
 from datetime import datetime
 import json
+import re
 import traceback
 import time
 
@@ -770,15 +771,16 @@ def start_strategy():
         
         # Get strategy type
         strategy_type = get_strategy_service().get_strategy_type(strategy_id)
-        
-        # Update strategy status
-        get_strategy_service().update_strategy_status(strategy_id, 'running', user_id=user_id)
-        
-        # Local backend: AI strategy executor was removed. Only indicator strategies are supported.
-        if strategy_type == 'PromptBasedStrategy':
-            return jsonify({'code': 0, 'msg': 'AI strategy has been removed; local edition does not support starting AI strategies', 'data': None}), 400
 
-        # Indicator strategy
+        # IndicatorStrategy and ScriptStrategy are executed by TradingExecutor.
+        if strategy_type == 'PromptBasedStrategy':
+            return jsonify({
+                'code': 0,
+                'msg': 'AI strategy has been removed; local edition does not support starting AI strategies',
+                'data': None
+            }), 400
+        get_strategy_service().update_strategy_status(strategy_id, 'running', user_id=user_id)
+
         success = get_trading_executor().start_strategy(strategy_id)
         
         if not success:
@@ -1241,12 +1243,65 @@ def verify_strategy_code():
 @strategy_bp.route('/strategies/ai-generate', methods=['POST'])
 @login_required
 def ai_generate_strategy():
-    """Generate strategy code using AI."""
+    """Generate strategy code or suggest template parameter updates using AI."""
     try:
         payload = request.get_json() or {}
         prompt = payload.get('prompt', '')
         if not prompt.strip():
-            return jsonify({'code': '', 'msg': 'Prompt is empty'})
+            return jsonify({'code': '', 'msg': 'Prompt is empty', 'params': None})
+
+        intent = (payload.get('intent') or 'generate_code').strip()
+        from app.services.llm import LLMService
+        llm = LLMService()
+        api_key = llm.get_api_key()
+        if not api_key:
+            return jsonify({'code': '', 'msg': 'No LLM API key configured', 'params': None})
+
+        if intent == 'adjust_params':
+            template_key = payload.get('template_key') or ''
+            current_params = payload.get('params') or {}
+            code_snapshot = (payload.get('code') or '')[:8000]
+            system_prompt = """You tune quantitative strategy template parameters from the user's request.
+Return ONLY a single JSON object: keys are parameter names (strings), values are JSON numbers or booleans.
+You may return a partial object (only keys that should change) or a full object.
+Do not use markdown fences, do not add explanations before or after the JSON."""
+
+            user_content = (
+                f"Template key: {template_key}\n"
+                f"Current parameters (JSON):\n{json.dumps(current_params, ensure_ascii=False)}\n\n"
+                f"Strategy code excerpt (context):\n{code_snapshot}\n\n"
+                f"User request:\n{prompt.strip()}\n\n"
+                "Respond with JSON only."
+            )
+
+            content = llm.call_llm_api(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_content},
+                ],
+                model=llm.get_code_generation_model(),
+                temperature=0.3,
+                use_json_mode=False
+            )
+
+            raw = (content or '').strip()
+            if raw.startswith('```'):
+                raw = re.sub(r'^```[a-zA-Z]*', '', raw).strip()
+                if raw.endswith('```'):
+                    raw = raw[:-3].strip()
+            updates = None
+            try:
+                updates = json.loads(raw)
+            except json.JSONDecodeError:
+                m = re.search(r'\{[\s\S]*\}', raw)
+                if m:
+                    try:
+                        updates = json.loads(m.group(0))
+                    except json.JSONDecodeError:
+                        updates = None
+            if not isinstance(updates, dict):
+                return jsonify({'code': '', 'params': None, 'msg': 'AI did not return valid JSON parameters'})
+            return jsonify({'code': '', 'params': updates, 'msg': 'success'})
 
         system_prompt = """You are a quantitative trading strategy code generator.
 Generate Python strategy code that follows this framework:
@@ -1264,16 +1319,26 @@ Generate Python strategy code that follows this framework:
 
 Return ONLY the Python code, no explanations."""
 
-        from app.services.llm import LLMService
-        llm = LLMService()
-        api_key = llm.get_api_key()
-        if not api_key:
-            return jsonify({'code': '', 'msg': 'No LLM API key configured'})
+        extra = ''
+        template_key = payload.get('template_key')
+        params = payload.get('params')
+        code_ctx = (payload.get('code') or '').strip()
+        if template_key or params is not None or code_ctx:
+            extra_parts = []
+            if template_key:
+                extra_parts.append(f"Current template key: {template_key}")
+            if isinstance(params, dict) and params:
+                extra_parts.append('Current template parameters (JSON):\n' + json.dumps(params, ensure_ascii=False))
+            if code_ctx:
+                extra_parts.append('Current code (may be long):\n' + code_ctx[:12000])
+            extra = '\n\n' + '\n\n'.join(extra_parts)
+
+        user_prompt = prompt.strip() + extra
 
         content = llm.call_llm_api(
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": prompt},
+                {"role": "user", "content": user_prompt},
             ],
             model=llm.get_code_generation_model(),
             temperature=0.7,
@@ -1290,12 +1355,12 @@ Return ONLY the Python code, no explanations."""
         content = content.strip()
 
         if content:
-            return jsonify({'code': content, 'msg': 'success'})
+            return jsonify({'code': content, 'msg': 'success', 'params': None})
         else:
-            return jsonify({'code': '', 'msg': 'AI generation returned empty result'})
+            return jsonify({'code': '', 'msg': 'AI generation returned empty result', 'params': None})
     except Exception as e:
         logger.error(f"ai_generate_strategy failed: {str(e)}")
-        return jsonify({'code': '', 'msg': str(e)})
+        return jsonify({'code': '', 'msg': str(e), 'params': None})
 
 
 @strategy_bp.route('/strategies/performance', methods=['GET'])
