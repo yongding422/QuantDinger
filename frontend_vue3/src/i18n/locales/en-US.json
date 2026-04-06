@@ -377,6 +377,9 @@
     "reject": "Reject",
     "unpublish": "Unpublish"
   },
+  "admin": {
+    "systemHealth": "System Health"
+  },
   "user": {
     "title": "User Management",
     "list": "User List",

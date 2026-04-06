@@ -85,6 +85,7 @@
         <template #icon><UserOutlined /></template>
         <template #title>{{ $t('nav.admin') }}</template>
         <a-menu-item key="/admin/users">{{ $t('nav.userManagement') }}</a-menu-item>
+        <a-menu-item key="/admin/system-health">System Health</a-menu-item>
       </a-sub-menu>
 
       <!-- Trading platforms -->
