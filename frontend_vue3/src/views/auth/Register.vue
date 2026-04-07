@@ -1,7 +1,7 @@
 <template>
   <div class="register-page">
     <a-row justify="center" align="middle">
-      <a-col :xs="22" :sm="14" :md="10" :lg="8">
+      <a-col :xs="24" :sm="18" :md="14" :lg="10" :xl="8">
         <a-card class="register-card" :bordered="false">
           <div class="logo-area">
             <img src="/logo.png" alt="QuantDinger" height="48" />
@@ -124,9 +124,12 @@ async function handleRegister() {
 }
 
 .register-card {
-  padding: 32px 24px;
+  padding: 40px 32px;
   border-radius: 12px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  min-width: 380px;
+  max-width: 480px;
+  margin: 0 auto;
 }
 
 .logo-area {
