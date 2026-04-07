@@ -21,6 +21,7 @@
             v-if="activeTab === 'password'"
             layout="vertical"
             class="login-form"
+            :model="loginForm"
             @finish="handlePasswordLogin"
           >
             <a-form-item :label="$t('auth.email')" name="username">
@@ -63,6 +64,7 @@
             v-else
             layout="vertical"
             class="login-form"
+            :model="codeForm"
             @finish="handleCodeLogin"
           >
             <a-form-item :label="$t('auth.email')" name="email">
