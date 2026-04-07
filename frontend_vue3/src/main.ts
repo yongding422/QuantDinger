@@ -17,6 +17,9 @@ app.use(pinia)
 app.use(router)
 app.use(i18n)
 
+// Mount the app
+app.mount('#app')
+
 // Ant Design Vue ConfigProvider with dark/light theme
 // Will be used in App.vue
 export { app, pinia }
