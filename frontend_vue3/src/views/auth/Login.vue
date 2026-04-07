@@ -1,7 +1,7 @@
 <template>
   <div class="login-page">
     <a-row justify="center" align="middle" class="login-row">
-      <a-col :xs="22" :sm="14" :md="10" :lg="8">
+      <a-col :xs="24" :sm="18" :md="14" :lg="10" :xl="8">
         <a-card class="login-card" :bordered="false">
           <!-- Logo -->
           <div class="logo-area">
@@ -230,9 +230,12 @@ function handleGoogleLogin() {
 }
 
 .login-card {
-  padding: 32px 24px;
+  padding: 40px 32px;
   border-radius: 12px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  min-width: 380px;
+  max-width: 480px;
+  margin: 0 auto;
 }
 
 .logo-area {
@@ -254,13 +257,14 @@ function handleGoogleLogin() {
 }
 
 .login-form {
-  margin-top: 16px;
+  margin-top: 24px;
 }
 
 .oauth-buttons {
   display: flex;
   gap: 12px;
   justify-content: center;
+  flex-wrap: wrap;
 }
 
 .register-link {
