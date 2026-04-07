@@ -300,6 +300,76 @@ def analyze_polymarket():
         }), 500
 
 
+@polymarket_bp.route("/trending", methods=["GET"])
+def get_trending_markets():
+    """
+    Get trending Polymarket markets.
+    ---
+    tags:
+      - polymarket
+    parameters:
+      - in: query
+        name: limit
+        type: integer
+        default: 20
+        description: Number of markets to return
+    responses:
+      200:
+        description: List of trending markets
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                data:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                      question:
+                        type: string
+                      probabilityYes:
+                        type: number
+                      probabilityNo:
+                        type: number
+                      volume:
+                        type: number
+                      resolved:
+                        type: boolean
+    """
+    try:
+        limit = request.args.get('limit', 20, type=int)
+        
+        # Return mock trending data (can be replaced with real Polymarket API calls)
+        # For now, return empty array - frontend handles this gracefully
+        trending_markets = []
+        
+        return jsonify({
+            "code": 1,
+            "msg": "success",
+            "data": {
+                "data": trending_markets
+            }
+        })
+    
+    except Exception as e:
+        logger.error(f"Polymarket trending API failed: {e}", exc_info=True)
+        return jsonify({
+            "code": 0,
+            "msg": str(e),
+            "data": None
+        }), 500
+
+
 @polymarket_bp.route("/history", methods=["GET"])
 @login_required
 def get_polymarket_history():

@@ -633,6 +633,67 @@ def summary():
         return jsonify({"code": 0, "msg": str(e), "data": None}), 500
 
 
+@dashboard_bp.route("/recentTrades", methods=["GET"])
+@login_required
+def recent_trades():
+    """
+    Return recent trades for dashboard widget.
+    ---
+    tags:
+      - dashboard
+    parameters:
+      - in: query
+        name: limit
+        type: integer
+        default: 10
+        description: Number of trades to return
+    responses:
+      200:
+        description: List of recent trades
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: array
+              items:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  symbol:
+                    type: string
+                  side:
+                    type: string
+                    enum: [buy, sell]
+                  price:
+                    type: number
+                  quantity:
+                    type: number
+                  pnl:
+                    type: number
+                  timestamp:
+                    type: string
+    """
+    try:
+        limit = request.args.get('limit', 10, type=int)
+        
+        # Return empty array - table schema may vary, feature is new
+        # Can be implemented later with proper table structure
+        result = []
+        
+        return jsonify({'code': 1, 'msg': 'success', 'data': result})
+    
+    except Exception as e:
+        logger.error(f"dashboard recentTrades failed: {e}", exc_info=True)
+        return jsonify({'code': 0, 'msg': str(e), 'data': []}), 500
+
+
 @dashboard_bp.route("/pendingOrders", methods=["GET"])
 @login_required
 def pending_orders():

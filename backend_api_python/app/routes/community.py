@@ -16,6 +16,180 @@ community_bp = Blueprint("community", __name__)
 
 
 # ==========================================
+# 策略分享 (Strategy Sharing)
+# ==========================================
+
+@community_bp.route("/strategies", methods=["GET"])
+def get_shared_strategies():
+    """
+    Get shared strategies list with pagination and filtering.
+
+    ---
+    tags:
+      - community
+    parameters:
+      - in: query
+        name: sortBy
+        type: string
+        default: popular
+        enum: [popular, recent, most_liked]
+        description: Sort order
+      - in: query
+        name: page
+        type: integer
+        default: 1
+      - in: query
+        name: pageSize
+        type: integer
+        default: 20
+    responses:
+      200:
+        description: List of shared strategies
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 1
+            msg:
+              type: string
+              example: success
+            data:
+              type: object
+              properties:
+                data:
+                  type: object
+                  properties:
+                    items:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          id:
+                            type: integer
+                          strategyName:
+                            type: string
+                          userName:
+                            type: string
+                          description:
+                            type: string
+                          views:
+                            type: integer
+                          likes:
+                            type: integer
+                          commentCount:
+                            type: integer
+                          isLiked:
+                            type: boolean
+                          strategyCode:
+                            type: string
+    """
+    try:
+        sort_by = request.args.get('sortBy', 'popular')
+        page = request.args.get('page', 1, type=int)
+        page_size = request.args.get('pageSize', 20, type=int)
+        
+        # Return mock data - frontend handles empty state gracefully
+        # Can be implemented later with actual strategy sharing feature
+        strategies = []
+        
+        return jsonify({
+            "code": 1,
+            "msg": "success",
+            "data": {
+                "data": {
+                    "items": strategies
+                }
+            }
+        })
+    
+    except Exception as e:
+        logger.error(f"Community strategies API failed: {e}", exc_info=True)
+        return jsonify({
+            "code": 0,
+            "msg": str(e),
+            "data": None
+        }), 500
+
+
+@community_bp.route("/strategies/<int:strategy_id>", methods=["GET"])
+def get_strategy_detail(strategy_id: int):
+    """
+    Get strategy detail by ID.
+    ---
+    tags:
+      - community
+    responses:
+      200:
+        description: Strategy detail
+    """
+    try:
+        # Return mock empty data
+        return jsonify({
+            "code": 1,
+            "msg": "success",
+            "data": None
+        })
+    except Exception as e:
+        logger.error(f"Community strategy detail API failed: {e}", exc_info=True)
+        return jsonify({
+            "code": 0,
+            "msg": str(e),
+            "data": None
+        }), 500
+
+
+@community_bp.route("/strategies/<int:strategy_id>/comments", methods=["GET"])
+def get_strategy_comments(strategy_id: int):
+    """
+    Get comments for a strategy.
+    ---
+    tags:
+      - community
+    responses:
+      200:
+        description: List of comments
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+            msg:
+              type: string
+            data:
+              type: object
+              properties:
+                data:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      id:
+                        type: integer
+                      userName:
+                        type: string
+                      content:
+                        type: string
+    """
+    try:
+        # Return mock empty data
+        return jsonify({
+            "code": 1,
+            "msg": "success",
+            "data": {
+                "data": []
+            }
+        })
+    except Exception as e:
+        logger.error(f"Community strategy comments API failed: {e}", exc_info=True)
+        return jsonify({
+            "code": 0,
+            "msg": str(e),
+            "data": None
+        }), 500
+
+
+# ==========================================
 # 指标市场
 # ==========================================
 
