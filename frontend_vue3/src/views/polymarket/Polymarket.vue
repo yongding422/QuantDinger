@@ -183,7 +183,7 @@ const marketColumns = [
 const historyColumns = [
   { title: 'Question', key: 'question', width: 300, ellipsis: true },
   { title: 'Yes %', key: 'probabilityYes', width: 90 },
-  { title: 'No %', key: 'probabilityNo', width: 90, customRender: ({ record }: { record: PolymarketAnalysis }) => `${(record.probabilityNo * 100).toFixed(1)}%` },
+  { title: 'No %', key: 'probabilityNo', width: 90, customRender: ({ record }: { record: PolymarketAnalysis }) => record.probabilityNo ? `${(record.probabilityNo * 100).toFixed(1)}%` : '—' },
   { title: 'Recommendation', key: 'recommendation', width: 130 },
   { title: 'Risk', key: 'riskLevel', width: 90 },
   { title: 'Date', key: 'createdAt', width: 170 },
@@ -220,8 +220,10 @@ async function loadTrending() {
   loadingMarkets.value = true
   try {
     const res = await polymarketApi.getTrendingMarkets(20)
-    trendingMarkets.value = res.data.data?.data ?? []
+    const data = res.data.data
+    trendingMarkets.value = Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : []
   } catch {
+    trendingMarkets.value = []
     message.error('Failed to load trending markets')
   } finally {
     loadingMarkets.value = false
@@ -232,8 +234,10 @@ async function loadHistory() {
   historyLoading.value = true
   try {
     const res = await polymarketApi.getAnalysisHistory({ pageSize: 50 })
-    analysisHistory.value = res.data.data?.items ?? []
+    const data = res.data.data
+    analysisHistory.value = Array.isArray(data?.items) ? data.items : Array.isArray(data) ? data : []
   } catch {
+    analysisHistory.value = []
     message.error('Failed to load history')
   } finally {
     historyLoading.value = false

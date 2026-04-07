@@ -136,7 +136,11 @@ async function loadStrategies() {
   loading.value = true
   try {
     const res = await communityApi.getSharedStrategies({ sortBy: sortBy.value })
-    strategies.value = res.data.data?.data?.items ?? []
+    const data = res.data.data
+    strategies.value = Array.isArray(data?.data?.items) ? data.data.items : Array.isArray(data) ? data : []
+  } catch {
+    strategies.value = []
+    message.info('Community strategies not available yet')
   } finally { loading.value = false }
 }
 

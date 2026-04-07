@@ -12,6 +12,9 @@ import {
 } from '@/api/strategies'
 
 export const useStrategiesStore = defineStore('strategies', () => {
+  // Strategy list
+  const strategies = ref<Strategy[]>([])
+  
   // Current strategy detail
   const currentStrategy = ref<Strategy | null>(null)
   const trades = ref<Trade[]>([])
@@ -22,6 +25,20 @@ export const useStrategiesStore = defineStore('strategies', () => {
   // Loading states
   const loading = ref(false)
   const backtestRunning = ref(false)
+
+  // Fetch all strategies
+  async function fetchStrategies() {
+    loading.value = true
+    try {
+      const res = await strategiesApi.list()
+      // API returns { code, msg, data } envelope, then data is the array
+      strategies.value = Array.isArray(res.data.data) ? res.data.data : []
+    } catch (e) {
+      strategies.value = []
+    } finally {
+      loading.value = false
+    }
+  }
 
   // Fetch strategy by ID
   async function fetchStrategy(id: number) {
@@ -120,6 +137,7 @@ export const useStrategiesStore = defineStore('strategies', () => {
   }
 
   return {
+    strategies,
     currentStrategy,
     trades,
     equityCurve,
@@ -127,6 +145,7 @@ export const useStrategiesStore = defineStore('strategies', () => {
     notifications,
     loading,
     backtestRunning,
+    fetchStrategies,
     fetchStrategy,
     fetchTrades,
     fetchEquityCurve,
