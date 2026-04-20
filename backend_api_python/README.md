@@ -201,6 +201,12 @@ Example:
 GET /api/global-market/adanos-sentiment?tickers=AAPL,TSLA&source=reddit&days=7
 ```
 
+The response normalizes common compare fields across sources, including
+`sentiment_score`, `buzz_score`, `bullish_pct`, `bearish_pct`, `mentions`,
+`trend`, `trend_history`, and source-specific activity metrics such as
+`subreddit_count`, `unique_tweets`, `source_count`, `trade_count`,
+`market_count`, and `total_liquidity`.
+
 ## AI analysis & memory
 
 Uses **FastAnalysisService** (single LLM call, multi-factor):

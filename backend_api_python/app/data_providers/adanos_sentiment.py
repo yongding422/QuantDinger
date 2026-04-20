@@ -1,6 +1,7 @@
 """Optional Adanos Market Sentiment provider for US stock tickers."""
 from __future__ import annotations
 
+import math
 import os
 import re
 from typing import Any, Dict, Iterable, List, Optional
@@ -28,8 +29,11 @@ SUPPORTED_SOURCES = {
 _TICKER_RE = re.compile(r"^\$?[A-Z][A-Z0-9.]{0,9}$")
 
 
-def parse_tickers(value: str | Iterable[str]) -> List[str]:
+def parse_tickers(value: str | Iterable[str] | None) -> List[str]:
     """Normalize comma-separated or iterable stock ticker input."""
+    if value is None:
+        return []
+
     raw_values = value.split(",") if isinstance(value, str) else list(value)
     tickers: List[str] = []
     seen = set()
@@ -61,9 +65,10 @@ def _to_float(value: Any) -> Optional[float]:
     if value in (None, ""):
         return None
     try:
-        return float(value)
+        number = float(value)
     except (TypeError, ValueError):
         return None
+    return number if math.isfinite(number) else None
 
 
 def _to_int(value: Any) -> Optional[int]:
@@ -71,9 +76,21 @@ def _to_int(value: Any) -> Optional[int]:
     return int(number) if number is not None else None
 
 
-def _rows(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
-    rows = payload.get("stocks") or payload.get("data") or payload.get("results") or []
-    return rows if isinstance(rows, list) else []
+def _pick(record: Dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if key in record:
+            return record.get(key)
+    return None
+
+
+def _rows(payload: Any) -> List[Dict[str, Any]]:
+    if isinstance(payload, list):
+        rows = payload
+    elif isinstance(payload, dict):
+        rows = payload.get("stocks") or payload.get("data") or payload.get("results") or []
+    else:
+        rows = []
+    return [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
 
 
 def _normalize_record(record: Dict[str, Any], source: str) -> Optional[Dict[str, Any]]:
@@ -83,18 +100,24 @@ def _normalize_record(record: Dict[str, Any], source: str) -> Optional[Dict[str,
 
     return {
         "ticker": ticker,
-        "company_name": record.get("company_name"),
+        "company_name": _pick(record, "company_name", "name", "company"),
         "source": source,
-        "sentiment_score": _to_float(record.get("sentiment_score", record.get("sentiment", record.get("score")))),
-        "buzz_score": _to_float(record.get("buzz_score", record.get("buzz"))),
+        "sentiment_score": _to_float(_pick(record, "sentiment_score", "sentiment", "score")),
+        "buzz_score": _to_float(_pick(record, "buzz_score", "buzz")),
         "bullish_pct": _to_float(record.get("bullish_pct")),
         "bearish_pct": _to_float(record.get("bearish_pct")),
-        "mentions": _to_int(record.get("mentions")),
+        "mentions": _to_int(_pick(record, "mentions", "mention_count")),
         "source_count": _to_int(record.get("source_count")),
         "subreddit_count": _to_int(record.get("subreddit_count")),
-        "trade_count": _to_int(record.get("trade_count")),
+        "unique_posts": _to_int(record.get("unique_posts")),
         "unique_tweets": _to_int(record.get("unique_tweets")),
+        "trade_count": _to_int(record.get("trade_count")),
+        "market_count": _to_int(record.get("market_count")),
+        "unique_traders": _to_int(record.get("unique_traders")),
+        "total_upvotes": _to_int(_pick(record, "total_upvotes", "upvotes")),
+        "total_liquidity": _to_float(record.get("total_liquidity")),
         "trend": record.get("trend"),
+        "trend_history": record.get("trend_history") if isinstance(record.get("trend_history"), list) else [],
     }
 
 
@@ -110,7 +133,7 @@ def _timeout() -> int:
 
 
 def fetch_adanos_market_sentiment(
-    tickers: str | Iterable[str],
+    tickers: str | Iterable[str] | None,
     *,
     source: Optional[str] = None,
     days: int = DEFAULT_DAYS,

@@ -61,7 +61,10 @@ def test_adanos_sentiment_fetches_and_normalizes(monkeypatch):
                         "buzz_score": "72.5",
                         "bullish_pct": "58",
                         "mentions": "128",
+                        "unique_posts": "32",
+                        "total_upvotes": "1204",
                         "trend": "rising",
+                        "trend_history": [45.0, 51.5, 72.5],
                     }
                 ]
             }
@@ -94,9 +97,15 @@ def test_adanos_sentiment_fetches_and_normalizes(monkeypatch):
         "mentions": 128,
         "source_count": None,
         "subreddit_count": None,
-        "trade_count": None,
+        "unique_posts": 32,
         "unique_tweets": None,
+        "trade_count": None,
+        "market_count": None,
+        "unique_traders": None,
+        "total_upvotes": 1204,
+        "total_liquidity": None,
         "trend": "rising",
+        "trend_history": [45.0, 51.5, 72.5],
     }
     assert calls[0][0] == "https://api.example.test/reddit/stocks/v1/compare"
     assert calls[0][1]["params"] == {"tickers": "AAPL", "days": 14}
@@ -120,6 +129,58 @@ def test_adanos_sentiment_fail_open_on_http_error(monkeypatch):
     assert result["enabled"] is True
     assert result["stocks"] == []
     assert result["error"] == "Adanos API returned HTTP 429"
+
+
+def test_adanos_sentiment_handles_list_payload_and_non_finite_numbers():
+    from app.data_providers.adanos_sentiment import fetch_adanos_market_sentiment
+
+    class FakeResponse:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return [
+                {
+                    "symbol": "$MSFT",
+                    "name": "Microsoft Corp.",
+                    "sentiment": "NaN",
+                    "buzz": "inf",
+                    "mentions": "bad",
+                    "market_count": "3",
+                    "total_liquidity": "45200.5",
+                    "trend_history": [12.0, 18.5],
+                },
+                "not-a-row",
+                {},
+            ]
+
+    class FakeSession:
+        @staticmethod
+        def get(url, **kwargs):
+            return FakeResponse()
+
+    result = fetch_adanos_market_sentiment(
+        None,
+        api_key="adanos_test_key",
+        session=FakeSession,
+    )
+    assert result["stocks"] == []
+    assert result["error"] == "No valid stock tickers provided"
+
+    result = fetch_adanos_market_sentiment(
+        "MSFT",
+        api_key="adanos_test_key",
+        session=FakeSession,
+    )
+
+    assert result["stocks"][0]["ticker"] == "MSFT"
+    assert result["stocks"][0]["company_name"] == "Microsoft Corp."
+    assert result["stocks"][0]["sentiment_score"] is None
+    assert result["stocks"][0]["buzz_score"] is None
+    assert result["stocks"][0]["mentions"] is None
+    assert result["stocks"][0]["market_count"] == 3
+    assert result["stocks"][0]["total_liquidity"] == 45200.5
+    assert result["stocks"][0]["trend_history"] == [12.0, 18.5]
 
 
 def test_adanos_sentiment_validates_source():
